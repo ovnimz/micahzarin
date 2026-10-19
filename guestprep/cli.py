@@ -16,13 +16,23 @@ from .models import Episode
 
 BLOCKED_HELP = """\
 YouTube is refusing transcript requests from this network ("sign in to confirm
-you're not a bot" / IP block). This almost always means you're on a cloud or
-datacenter IP. Fixes, easiest first:
-  - run guestprep from your own computer / home network
-  - pass --cookies cookies.txt (export from a logged-in browser; see
-    https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp)
+you're not a bot"). Common on cloud/datacenter IPs and VPNs. Fixes, easiest first:
+  - add --cookies-from-browser chrome (or safari / firefox), using a browser
+    where you're logged in to YouTube
+  - turn off any VPN, or run from your own computer / home network
   - pass --proxy http://user:pass@host:port (a residential proxy)
   - download transcripts yourself and pass --transcripts DIR"""
+
+RATE_LIMIT_HELP = """\
+YouTube is rate-limiting this network (HTTP 429: too many requests recently).
+It clears up on its own. Options:
+  - wait 30-60 minutes and run the same command again. Transcripts already
+    downloaded are saved, so it picks up where it left off
+  - add --cookies-from-browser chrome (or safari / firefox) to use your
+    YouTube login, which gets a much higher limit
+  - use -n 8 to fetch fewer interviews per run"""
+
+RATE_LIMIT_WAITS = (60, 180)  # seconds to back off before retrying after a 429
 
 
 NO_KEY_HELP = """\
@@ -49,7 +59,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--urls-file", type=Path, help="file with one YouTube URL per line")
     p.add_argument("--no-search", action="store_true", help="only use --url / --urls-file / --transcripts")
     p.add_argument("--transcripts", type=Path, help="directory of transcripts you already have (.txt .vtt .srt .json3)")
-    p.add_argument("--cookies", help="Netscape cookies.txt for YouTube (helps when YouTube blocks requests)")
+    p.add_argument("--cookies-from-browser", metavar="BROWSER", help="use YouTube login cookies from chrome / safari / firefox / edge / brave")
+    p.add_argument("--cookies", help="Netscape cookies.txt for YouTube (alternative to --cookies-from-browser)")
     p.add_argument("--proxy", help="HTTP(S) proxy URL for YouTube requests")
     p.add_argument("--model", default=DEFAULT_MODEL, help=f"Claude model (default {DEFAULT_MODEL})")
     p.add_argument("--no-llm", action="store_true", help="keyword heuristics instead of Claude (rough; no API key needed)")
@@ -94,11 +105,17 @@ def gather_episodes(args: argparse.Namespace) -> list[Episode]:
     for v in candidates:
         if len(episodes) >= args.max_interviews:
             break
+        was_cached = transcripts.cache_path(v, args.cache_dir).exists()
         try:
-            segs = transcripts.fetch_youtube(v, args.cache_dir, args.proxy, args.cookies)
+            segs = _fetch_with_backoff(v, args)
+        except transcripts.TranscriptRateLimited as e:
+            print(f"\n  rate-limited: {e}\n\n{RATE_LIMIT_HELP}\n", file=sys.stderr)
+            break
         except transcripts.TranscriptBlocked as e:
             print(f"\n  blocked: {e}\n\n{BLOCKED_HELP}\n", file=sys.stderr)
             break
+        if not was_cached:
+            time.sleep(2)  # be gentle; YouTube rate-limits bursts
         if not segs:
             continue
         if not v.confirmed:
@@ -109,15 +126,26 @@ def gather_episodes(args: argparse.Namespace) -> list[Episode]:
             v.confirmed = True
         print(f"  ✓ {v.title} [{v.channel}]", file=sys.stderr)
         episodes.append(Episode(video=v, segments=segs))
-        time.sleep(0.5)  # be gentle; YouTube rate-limits bursts
 
     return episodes
+
+
+def _fetch_with_backoff(v, args) -> list:
+    for wait in (*RATE_LIMIT_WAITS, None):
+        try:
+            return transcripts.fetch_youtube(v, args.cache_dir, args.proxy, args.cookies)
+        except transcripts.TranscriptRateLimited:
+            if wait is None:
+                raise
+            print(f"  YouTube says too many requests; waiting {wait}s before retrying...", file=sys.stderr)
+            time.sleep(wait)
+    raise AssertionError("unreachable")
 
 
 def run(args: argparse.Namespace) -> int:
     episodes = gather_episodes(args)
     if not episodes:
-        print("No usable interviews found.", file=sys.stderr)
+        print("No usable interviews found yet.", file=sys.stderr)
         return 1
 
     print(f"Extracting questions from {len(episodes)} interview(s)...", file=sys.stderr)
@@ -158,7 +186,9 @@ def run(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    if not args.no_llm and not os.environ.get("ANTHROPIC_API_KEY") and not os.environ.get("ANTHROPIC_AUTH_TOKEN"):
+    if args.cookies_from_browser:
+        args.cookies = f"browser:{args.cookies_from_browser.lower()}"
+    if not (args.no_llm or args.list_only) and not os.environ.get("ANTHROPIC_API_KEY") and not os.environ.get("ANTHROPIC_AUTH_TOKEN"):
         print(NO_KEY_HELP, file=sys.stderr)
         return 2
     try:

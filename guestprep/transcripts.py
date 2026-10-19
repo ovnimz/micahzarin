@@ -17,6 +17,22 @@ class TranscriptBlocked(RuntimeError):
     """YouTube refused us (bot check / IP block). Retrying other videos won't help."""
 
 
+class TranscriptRateLimited(TranscriptBlocked):
+    """HTTP 429: too many requests recently. Goes away if we wait."""
+
+
+def ytdlp_opts(proxy: str | None, cookies: str | None, **extra) -> dict:
+    """Common yt-dlp options. `cookies` is a cookies.txt path or "browser:<name>"."""
+    opts = {"quiet": True, "no_warnings": True, "skip_download": True, **extra}
+    if proxy:
+        opts["proxy"] = proxy
+    if cookies and cookies.startswith("browser:"):
+        opts["cookiesfrombrowser"] = (cookies.split(":", 1)[1],)
+    elif cookies:
+        opts["cookiefile"] = cookies
+    return opts
+
+
 # ---------------------------------------------------------------- YouTube
 
 def _via_transcript_api(video_id: str, proxy: str | None) -> list[Segment]:
@@ -41,21 +57,18 @@ def _via_ytdlp(video_id: str, proxy: str | None, cookies: str | None) -> list[Se
     import yt_dlp
 
     with tempfile.TemporaryDirectory() as tmp:
-        opts = {
-            "skip_download": True,
-            "writesubtitles": True,
-            "writeautomaticsub": True,
-            "subtitleslangs": ["en", "en-US", "en-GB", "en.*"],
-            "subtitlesformat": "json3",
-            "outtmpl": str(Path(tmp) / "%(id)s.%(ext)s"),
-            "quiet": True,
-            "no_warnings": True,
-            "logger": _SilentLogger(),
-        }
-        if proxy:
-            opts["proxy"] = proxy
-        if cookies:
-            opts["cookiefile"] = cookies
+        opts = ytdlp_opts(
+            proxy,
+            cookies,
+            writesubtitles=True,
+            writeautomaticsub=True,
+            # Each language is a separate request; asking for many trips YouTube's rate limit.
+            subtitleslangs=["en", "en-US", "en-GB"],
+            subtitlesformat="json3",
+            sleep_interval_subtitles=1,
+            outtmpl=str(Path(tmp) / "%(id)s.%(ext)s"),
+            logger=_SilentLogger(),
+        )
         with yt_dlp.YoutubeDL(opts) as ydl:
             ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
         files = sorted(Path(tmp).glob(f"{video_id}*.json3"))
@@ -81,13 +94,17 @@ def _looks_blocked(err: Exception) -> bool:
     return any(s in msg for s in ("ipblocked", "requestblocked", "not a bot", "429", "too many requests"))
 
 
+def cache_path(video: Video, cache_dir: Path) -> Path:
+    return cache_dir / "transcripts" / f"{video.id}.json"
+
+
 def fetch_youtube(
     video: Video,
     cache_dir: Path,
     proxy: str | None = None,
     cookies: str | None = None,
 ) -> list[Segment]:
-    cache = cache_dir / "transcripts" / f"{video.id}.json"
+    cache = cache_path(video, cache_dir)
     if cache.exists():
         return [Segment(**s) for s in json.loads(cache.read_text())]
 
@@ -104,7 +121,11 @@ def fetch_youtube(
 
     if not segments:
         if errors and all(_looks_blocked(e) for e in errors):
-            raise TranscriptBlocked(str(errors[-1]).splitlines()[0])
+            msgs = " ".join(str(e).lower() for e in errors)
+            first_line = str(errors[-1]).splitlines()[0]
+            if "not a bot" not in msgs and ("429" in msgs or "too many requests" in msgs):
+                raise TranscriptRateLimited(first_line)
+            raise TranscriptBlocked(first_line)
         if errors:
             print(f"  no transcript for {video.id}: {str(errors[-1]).splitlines()[0]}", file=sys.stderr)
         return []

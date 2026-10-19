@@ -245,3 +245,34 @@ def test_about_reaches_prompt_and_cache_key(tmp_path):
     extract.extract_with_claude(fake, "claude-opus-5-5", "Jane Ortiz", ep, tmp_path, about="a different person")
     extract.extract_with_claude(fake, "claude-opus-5-5", "Jane Ortiz", ep, tmp_path, about="personal finance author")
     assert len(fake.calls) == 2
+
+
+def test_rate_limit_classified_separately(monkeypatch, tmp_path):
+    def api(*a):
+        raise RuntimeError("IpBlocked: YouTube is blocking requests from your IP. You have done too many requests")
+    def ytdlp(*a):
+        raise RuntimeError("ERROR: Unable to download video subtitles for 'en': HTTP Error 429: Too Many Requests")
+    monkeypatch.setattr(transcripts, "_via_transcript_api", api)
+    monkeypatch.setattr(transcripts, "_via_ytdlp", ytdlp)
+    with pytest.raises(transcripts.TranscriptRateLimited):
+        transcripts.fetch_youtube(Video(id="AAAAAAAAAAA", title="t"), tmp_path)
+
+
+def test_rate_limit_backoff_then_success(monkeypatch, tmp_path):
+    attempts = []
+    def fetch(v, cache_dir, proxy, cookies):
+        attempts.append(1)
+        if len(attempts) < 3:
+            raise transcripts.TranscriptRateLimited("429")
+        return [Segment(0, "hi")]
+    monkeypatch.setattr(transcripts, "fetch_youtube", fetch)
+    monkeypatch.setattr(cli.time, "sleep", lambda s: None)
+    args = SimpleNamespace(cache_dir=tmp_path, proxy=None, cookies=None)
+    assert cli._fetch_with_backoff(Video(id="AAAAAAAAAAA", title="t"), args) == [Segment(0, "hi")]
+    assert len(attempts) == 3
+
+
+def test_ytdlp_opts_cookies():
+    assert transcripts.ytdlp_opts(None, "browser:chrome")["cookiesfrombrowser"] == ("chrome",)
+    assert transcripts.ytdlp_opts(None, "c.txt")["cookiefile"] == "c.txt"
+    assert "cookiefile" not in transcripts.ytdlp_opts(None, None)

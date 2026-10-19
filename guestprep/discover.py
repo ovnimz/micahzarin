@@ -5,6 +5,7 @@ import re
 import sys
 
 from .models import Video
+from .transcripts import ytdlp_opts
 
 SEARCH_TEMPLATES = [
     '"{name}" podcast',
@@ -85,16 +86,7 @@ def search_youtube(
     """
     import yt_dlp
 
-    opts = {
-        "extract_flat": "in_playlist",
-        "quiet": True,
-        "no_warnings": True,
-        "skip_download": True,
-    }
-    if proxy:
-        opts["proxy"] = proxy
-    if cookies:
-        opts["cookiefile"] = cookies
+    opts = ytdlp_opts(proxy, cookies, extract_flat="in_playlist")
 
     queries = [t.format(name=name) for t in SEARCH_TEMPLATES] + list(extra_queries or [])
     found: list[Video] = []
@@ -138,11 +130,7 @@ def fill_metadata(videos: list[Video], proxy: str | None = None, cookies: str | 
     """Best-effort title/channel lookup for bare URLs; failures are harmless."""
     import yt_dlp
 
-    opts = {"quiet": True, "no_warnings": True, "skip_download": True, "extract_flat": True}
-    if proxy:
-        opts["proxy"] = proxy
-    if cookies:
-        opts["cookiefile"] = cookies
+    opts = ytdlp_opts(proxy, cookies, extract_flat=True)
     with yt_dlp.YoutubeDL(opts) as ydl:
         for v in videos:
             if v.title != v.id:

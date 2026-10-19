@@ -59,14 +59,27 @@ guestprep "Jane Doe" --no-llm                 # keyword heuristics only, no API 
 transcripts on their websites; save them as `.txt` files. Lines may start with
 `[mm:ss]` timestamps.
 
+## "Too many requests" (HTTP 429)
+
+YouTube limits how many caption downloads you can make in a short time. When it
+hits the limit, guestprep waits and retries. If it still can't continue, it
+analyses whatever it already downloaded. To get past the limit:
+
+- wait 30-60 minutes and re-run. Downloaded transcripts are cached, so it
+  continues where it left off
+- `--cookies-from-browser chrome` (or `safari`, `firefox`): uses your YouTube
+  login, which gets a much higher limit. On a Mac, Chrome asks for keychain
+  access the first time; click "Always Allow"
+
 ## "Sign in to confirm you're not a bot"
 
 YouTube blocks caption requests from cloud and datacenter IPs. Run guestprep
 from your own machine on a normal home or office connection. If you still get
 blocked:
 
-- `--cookies cookies.txt`: export cookies from a browser that's logged in to
-  YouTube ([how](https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp))
+- `--cookies-from-browser chrome`: uses the login from a browser where you're
+  signed in to YouTube
+- `--cookies cookies.txt`: the same thing via an exported cookies file ([how](https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp))
 - `--proxy http://user:pass@host:port`: use a residential proxy
 
 ## Cost
