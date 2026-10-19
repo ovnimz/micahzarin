@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "guestprep"
+version = "0.1.0"
+description = "List the questions a podcast guest has already been asked, so you can skip the worn-out ones."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "anthropic>=1.0",
+  "yt-dlp>=2025.1.1",
+  "youtube-transcript-api>=1.2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+guestprep = "guestprep.cli:main"
+
+[tool.setuptools]
+packages = ["guestprep"]
