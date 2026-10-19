@@ -174,6 +174,7 @@ EXTRACTIONS = {
 
 
 def test_claude_pipeline_end_to_end(tmp_path, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
     fake = FakeClient(EXTRACTIONS)
     monkeypatch.setattr(cli, "make_client", lambda: fake)
     out = tmp_path / "prep.md"
@@ -226,3 +227,21 @@ def test_report_tiers_and_links():
     md = report.render_markdown("X", eps, [Cluster("L", "Canon?", [q1, q2])], worn_min=2)
     assert "| 2/2 | **L**: Canon? | [#1 1:15](https://www.youtube.com/watch?v=AAAAAAAAAAA&t=75s), [#2](https://www.youtube.com/watch?v=BBBBBBBBBBB) |" in md
     assert "Ep \\| One" in md
+
+
+def test_missing_key_is_a_clear_error(monkeypatch, capsys):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    assert cli.main(["Jane Ortiz", "--no-search", "--transcripts", str(FIXTURES)]) == 2
+    assert "ANTHROPIC_API_KEY isn't set" in capsys.readouterr().err
+
+
+def test_about_reaches_prompt_and_cache_key(tmp_path):
+    fake = FakeClient(EXTRACTIONS)
+    ep = _local_episodes()[0]
+    extract.extract_with_claude(fake, "claude-opus-5-5", "Jane Ortiz", ep, tmp_path, about="personal finance author")
+    assert "Who this guest is: personal finance author" in fake.calls[0]["messages"][0]["content"]
+    # a different --about must not reuse the cached answer
+    extract.extract_with_claude(fake, "claude-opus-5-5", "Jane Ortiz", ep, tmp_path, about="a different person")
+    extract.extract_with_claude(fake, "claude-opus-5-5", "Jane Ortiz", ep, tmp_path, about="personal finance author")
+    assert len(fake.calls) == 2

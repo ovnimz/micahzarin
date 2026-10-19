@@ -1,6 +1,7 @@
 """Pull the questions put to the guest out of one interview transcript."""
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import asdict
@@ -47,7 +48,8 @@ point. Skip anything the host did explore.
 
 Set guest_is_interviewed to false if this is not actually an interview of \
 the named guest (e.g. a solo episode about them, a different person with the \
-same name, a reaction video). In that case return empty lists."""
+same name, a reaction video). If you are told who the guest is, use that to \
+rule out namesakes. In that case return empty lists."""
 
 SCHEMA = {
     "type": "object",
@@ -74,15 +76,18 @@ SCHEMA = {
 }
 
 
-def extract_with_claude(client, model: str, guest: str, episode: Episode, cache_dir: Path) -> bool:
+def extract_with_claude(client, model: str, guest: str, episode: Episode, cache_dir: Path, about: str = "") -> bool:
     """Fill episode.questions / unexplored_threads. Returns False if this isn't a real interview."""
     safe_id = re.sub(r"[^A-Za-z0-9_-]", "_", episode.video.id)
-    cache = cache_dir / "extract" / f"{PROMPT_VERSION}-{model}-{safe_id}.json"
+    about_key = hashlib.sha1(about.encode()).hexdigest()[:8] if about else "any"
+    cache = cache_dir / "extract" / f"{PROMPT_VERSION}-{model}-{about_key}-{safe_id}.json"
     if cache.exists():
         data = json.loads(cache.read_text())
     else:
         user = (
             f"Guest: {guest}\n"
+            + (f"Who this guest is: {about}\n" if about else "")
+            + 
             f"Show/channel: {episode.video.channel}\n"
             f"Episode title: {episode.video.title}\n\n"
             f"<transcript>\n{to_prompt_text(episode.segments)}\n</transcript>"

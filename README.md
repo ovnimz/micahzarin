@@ -50,6 +50,7 @@ guestprep "Jane Doe" --list-only              # just show what search finds
 guestprep "Jane Doe" --url https://youtu.be/... --url ...   # add known appearances
 guestprep "Jane Doe" --no-search --urls-file appearances.txt
 guestprep "Jane Doe" --transcripts ./transcripts/   # .txt/.vtt/.srt you already have
+guestprep "Claire Field" --about "Australian VET and tertiary education policy expert"   # rule out namesakes
 guestprep "Jane Doe" --query '"Jane Doe" Lex Fridman'   # extra search terms
 guestprep "Jane Doe" --no-llm                 # keyword heuristics only, no API key (rough)
 ```

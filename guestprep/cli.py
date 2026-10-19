@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 import time
@@ -24,6 +25,14 @@ datacenter IP. Fixes, easiest first:
   - download transcripts yourself and pass --transcripts DIR"""
 
 
+NO_KEY_HELP = """\
+ANTHROPIC_API_KEY isn't set in this Terminal window.
+  - If you added it to ~/.zshrc, open a new Terminal window (or run: source ~/.zshrc),
+    then cd back here and run: source .venv/bin/activate
+  - Or set it just for this window: export ANTHROPIC_API_KEY=sk-ant-...
+  - Or run without Claude (rough results): add --no-llm"""
+
+
 def _slug(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-") or "guest"
 
@@ -34,6 +43,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("-n", "--max-interviews", type=int, default=15, help="stop after this many usable interviews (default 15)")
     p.add_argument("--per-query", type=int, default=15, help="YouTube results per search query (default 15)")
     p.add_argument("--min-minutes", type=float, default=20, help="ignore videos shorter than this; filters out clips (default 20)")
+    p.add_argument("--about", default="", help='who the guest is, to rule out namesakes, e.g. "Australian VET and tertiary education policy expert"')
     p.add_argument("--query", action="append", default=[], help="extra YouTube search query (repeatable)")
     p.add_argument("--url", action="append", default=[], help="YouTube URL of a known appearance (repeatable)")
     p.add_argument("--urls-file", type=Path, help="file with one YouTube URL per line")
@@ -68,7 +78,8 @@ def gather_episodes(args: argparse.Namespace) -> list[Episode]:
     if not args.no_search:
         print(f"Searching YouTube for {args.guest}...", file=sys.stderr)
         found = discover.search_youtube(
-            args.guest, args.per_query, args.min_minutes, args.proxy, args.cookies, args.query
+            args.guest, args.per_query, args.min_minutes, args.proxy, args.cookies,
+            args.query + ([f'"{args.guest}" {args.about}'] if args.about else []),
         )
         known = {v.id for v in candidates}
         candidates += [v for v in found if v.id not in known]
@@ -119,7 +130,7 @@ def run(args: argparse.Namespace) -> int:
 
         def work(ep: Episode) -> Episode | None:
             try:
-                ok = extract.extract_with_claude(client, args.model, args.guest, ep, args.cache_dir)
+                ok = extract.extract_with_claude(client, args.model, args.guest, ep, args.cache_dir, args.about)
             except LLMError as e:
                 print(f"  extraction failed for {ep.video.title}: {e}", file=sys.stderr)
                 return None
@@ -147,6 +158,9 @@ def run(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if not args.no_llm and not os.environ.get("ANTHROPIC_API_KEY") and not os.environ.get("ANTHROPIC_AUTH_TOKEN"):
+        print(NO_KEY_HELP, file=sys.stderr)
+        return 2
     try:
         return run(args)
     except KeyboardInterrupt:
@@ -154,7 +168,7 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as e:
         import anthropic
 
-        if isinstance(e, anthropic.AuthenticationError):
+        if isinstance(e, anthropic.AuthenticationError) or "Could not resolve authentication" in str(e):
             print("Claude API authentication failed: set ANTHROPIC_API_KEY (or use --no-llm).", file=sys.stderr)
             return 2
         if isinstance(e, anthropic.APIConnectionError):
