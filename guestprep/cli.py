@@ -10,7 +10,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from . import cluster, discover, extract, report, transcripts
+from . import cluster, discover, extract, report, suggest, transcripts, web
 from .llm import DEFAULT_MODEL, LLMError, make_client
 from .models import Episode
 
@@ -57,7 +57,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--query", action="append", default=[], help="extra YouTube search query (repeatable)")
     p.add_argument("--url", action="append", default=[], help="YouTube URL of a known appearance (repeatable)")
     p.add_argument("--urls-file", type=Path, help="file with one YouTube URL per line")
-    p.add_argument("--no-search", action="store_true", help="only use --url / --urls-file / --transcripts")
+    p.add_argument("--no-search", action="store_true", help="only use --url / --urls-file / --transcripts (and --web)")
+    p.add_argument("--web", action="store_true", help="also search the whole web (podcast sites, written interviews, talks) with Claude")
+    p.add_argument("--no-suggest", action="store_true", help="skip writing fresh questions and no-context prompts")
     p.add_argument("--transcripts", type=Path, help="directory of transcripts you already have (.txt .vtt .srt .json3)")
     p.add_argument("--cookies-from-browser", metavar="BROWSER", help="use YouTube login cookies from chrome / safari / firefox / edge / brave")
     p.add_argument("--cookies", help="Netscape cookies.txt for YouTube (alternative to --cookies-from-browser)")
@@ -71,8 +73,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
-def gather_episodes(args: argparse.Namespace) -> list[Episode]:
+def gather_episodes(args: argparse.Namespace) -> tuple[list[Episode], list[dict]]:
+    """-> (interviews with transcripts, audio-only appearances found on the web)."""
     episodes: list[Episode] = []
+    audio_only: list[dict] = []
 
     if args.transcripts:
         for video, segs in transcripts.local_videos(args.transcripts):
@@ -83,6 +87,29 @@ def gather_episodes(args: argparse.Namespace) -> list[Episode]:
     if args.urls_file:
         urls += [l.strip() for l in args.urls_file.read_text().splitlines() if l.strip() and not l.startswith("#")]
     candidates = discover.videos_from_urls(urls, args.guest)
+
+    if args.web:
+        print(f"Searching the web for {args.guest} (takes a minute or two)...", file=sys.stderr)
+        found = web.discover(make_client(), args.model, args.guest, args.about, args.cache_dir)
+        yt_urls, pages, audio_only = web.split_appearances(found)
+        print(f"  {len(found)} appearances: {len(yt_urls)} YouTube, {len(pages)} pages, {len(audio_only)} audio-only", file=sys.stderr)
+        known = {v.id for v in candidates}
+        candidates += [v for v in discover.videos_from_urls(yt_urls, args.guest) if v.id not in known]
+        for a in pages:
+            if args.list_only:
+                print(f"🌐 {a['url']}  [{a.get('outlet', '')}] {a.get('title', '')}")
+                continue
+            got = web.fetch_page(a, args.cache_dir)
+            if got is None:
+                print(f"  no readable transcript: {a['url']}", file=sys.stderr)
+                continue
+            video, segs = got
+            print(f"  ✓ {video.title} [{video.channel}]", file=sys.stderr)
+            episodes.append(Episode(video=video, segments=segs))
+        if args.list_only:
+            for a in audio_only:
+                print(f"🔈 {a['url']}  [{a.get('outlet', '')}] {a.get('title', '')}")
+
     if candidates:
         discover.fill_metadata(candidates, args.proxy, args.cookies)
 
@@ -127,7 +154,7 @@ def gather_episodes(args: argparse.Namespace) -> list[Episode]:
         print(f"  ✓ {v.title} [{v.channel}]", file=sys.stderr)
         episodes.append(Episode(video=v, segments=segs))
 
-    return episodes
+    return episodes, audio_only
 
 
 def _fetch_with_backoff(v, args) -> list:
@@ -143,12 +170,13 @@ def _fetch_with_backoff(v, args) -> list:
 
 
 def run(args: argparse.Namespace) -> int:
-    episodes = gather_episodes(args)
+    episodes, audio_only = gather_episodes(args)
     if not episodes:
         print("No usable interviews found yet.", file=sys.stderr)
         return 1
 
     print(f"Extracting questions from {len(episodes)} interview(s)...", file=sys.stderr)
+    suggestions = None
     if args.no_llm:
         for ep in episodes:
             extract.extract_heuristic(ep)
@@ -175,10 +203,17 @@ def run(args: argparse.Namespace) -> int:
             return 1
         print("Grouping repeat questions across interviews...", file=sys.stderr)
         clusters = cluster.cluster_with_claude(client, args.model, args.guest, episodes)
+        if not args.no_suggest:
+            print("Writing fresh questions...", file=sys.stderr)
+            suggestions = suggest.suggest(client, args.model, args.guest, args.about, episodes, clusters)
 
     out = args.out or Path(f"guestprep-{_slug(args.guest)}.md")
-    out.write_text(report.render_markdown(args.guest, episodes, clusters, args.worn_min), encoding="utf-8")
-    out.with_suffix(".json").write_text(json.dumps(report.to_json(args.guest, episodes, clusters), indent=1), encoding="utf-8")
+    out.write_text(
+        report.render_markdown(args.guest, episodes, clusters, args.worn_min, suggestions, audio_only), encoding="utf-8"
+    )
+    out.with_suffix(".json").write_text(
+        json.dumps(report.to_json(args.guest, episodes, clusters, suggestions, audio_only), indent=1), encoding="utf-8"
+    )
     worn = sum(c.times_asked >= args.worn_min for c in clusters)
     print(f"\nWrote {out} ({worn} worn-out questions across {len(episodes)} interviews)", file=sys.stderr)
     return 0
@@ -188,7 +223,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     if args.cookies_from_browser:
         args.cookies = f"browser:{args.cookies_from_browser.lower()}"
-    if not (args.no_llm or args.list_only) and not os.environ.get("ANTHROPIC_API_KEY") and not os.environ.get("ANTHROPIC_AUTH_TOKEN"):
+    if args.web and args.no_llm:
+        print("--web uses Claude to search, so it can't be combined with --no-llm.", file=sys.stderr)
+        return 2
+    needs_claude = args.web or not (args.no_llm or args.list_only)
+    if needs_claude and not os.environ.get("ANTHROPIC_API_KEY") and not os.environ.get("ANTHROPIC_AUTH_TOKEN"):
         print(NO_KEY_HELP, file=sys.stderr)
         return 2
     try:

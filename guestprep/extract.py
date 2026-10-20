@@ -11,7 +11,7 @@ from .llm import call_json
 from .models import Episode, Question, Segment, parse_timestamp
 from .transcripts import to_prompt_text
 
-PROMPT_VERSION = "v1"  # bump to invalidate cached extractions
+PROMPT_VERSION = "v2"  # bump to invalidate cached extractions
 
 SYSTEM = """\
 You are helping a podcast host prepare to interview a guest. You will read a \
@@ -19,8 +19,10 @@ transcript of a PREVIOUS interview the guest gave on someone else's show and \
 list every question the guest was asked, so the host can avoid re-asking the \
 same worn-out questions.
 
-The transcript is usually YouTube auto-captions: no speaker labels, little or \
-no punctuation, and misheard words or names. Infer who is speaking from context.
+The transcript is usually YouTube auto-captions (no speaker labels, little or \
+no punctuation, misheard words or names), or text from a web page (a \
+published transcript or a written Q&A, possibly with leftover site \
+navigation). Infer who is speaking from context.
 
 What counts as a question:
 - Anything the host, co-host, or audience puts to the guest to answer, \

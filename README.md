@@ -29,6 +29,11 @@ guestprep "Morgan Housel"
    - **Worn out**: questions asked in 3 or more interviews, with timestamped
      links to each time they were asked
    - **Asked more than once**
+   - **Fresh questions**: questions none of the interviews asked, built on
+     the guest's work and on threads nobody followed up
+   - **No-context prompts**: stand-alone prompts the audience can follow
+     without knowing the guest's work (thought experiments, forced choices,
+     "what would change your mind", ...), picked to suit this guest
    - **Threads nobody pulled on**: the guest's passing remarks that no host
      picked up
    - Questions asked only once, collapsed
@@ -52,8 +57,14 @@ guestprep "Jane Doe" --no-search --urls-file appearances.txt
 guestprep "Jane Doe" --transcripts ./transcripts/   # .txt/.vtt/.srt you already have
 guestprep "Claire Field" --about "Australian VET and tertiary education policy expert"   # rule out namesakes
 guestprep "Jane Doe" --query '"Jane Doe" Lex Fridman'   # extra search terms
+guestprep "Jane Doe" --web                    # also search podcast sites, written interviews, talks
 guestprep "Jane Doe" --no-llm                 # keyword heuristics only, no API key (rough)
 ```
+
+`--web` has Claude search the whole web for the guest's appearances. Pages with
+a published transcript or a written Q&A are analysed like YouTube transcripts.
+YouTube links it finds are added to the YouTube list. Audio-only episodes are
+listed at the end of the prep sheet. Results are cached for a week.
 
 `--transcripts` covers podcasts that aren't on YouTube. Many shows publish
 transcripts on their websites; save them as `.txt` files. Lines may start with
@@ -87,7 +98,8 @@ blocked:
 Each transcript is read once and the result is cached, so re-runs only repeat
 the grouping step. A 1-2 hour episode is roughly 20-40k input tokens. A
 15-interview run on the default model (`claude-opus-5-5`) costs about
-$1-3. Use `--model` to pick a different one.
+$1-3. `--web` adds up to 15 web searches ($10 per 1,000) plus reading web
+transcripts, which can be longer than YouTube ones. Use `--model` to pick a different one.
 
 Requests have server-side refusal fallback turned on (`fallbacks: "default"`).
 If the model's safety classifier declines a transcript, the API retries it on

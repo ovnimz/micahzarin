@@ -151,6 +151,8 @@ class FakeClient:
         if "<transcript>" in user:
             title = user.split("Episode title: ")[1].split("\n")[0]
             return FakeStream(self.extractions[title])
+        if "Already asked" in user:
+            return FakeStream(SUGGESTIONS)
         # clustering: group ids whose gist text matches
         groups = {}
         for line in user.split("Questions:\n")[1].splitlines():
@@ -165,6 +167,11 @@ class FakeClient:
 def _q(ts, gist, topic="origin"):
     return {"timestamp": ts, "question": gist + " (as asked)", "gist": gist, "topic": topic}
 
+
+SUGGESTIONS = {
+    "fresh_questions": [{"question": "What did your father's bankruptcies teach you?", "why": "Raised, never explored.", "builds_on": "Her father went bankrupt twice"}],
+    "no_context_prompts": [{"prompt": "You get $1M but can never check your balance. Take it?", "technique": "forced choice", "why": "Tests her looking-rich idea."}],
+}
 
 EXTRACTIONS = {
     "ep1": {"guest_is_interviewed": True, "questions": [_q("0:40", "How did you get started?"), _q("3:00", "Biggest savings mistake?", "savings")], "unexplored_threads": ["Her father went bankrupt twice"]},
@@ -188,12 +195,17 @@ def test_claude_pipeline_end_to_end(tmp_path, monkeypatch):
     data = json.loads(out.with_suffix(".json").read_text())
     # every extracted question lands in exactly one cluster despite the bad ids
     assert sum(len(c["members"]) for c in data["clusters"]) == 7
-    assert len(fake.calls) == 4
+    assert len(fake.calls) == 5
+    fresh = md.split("## Fresh questions")[1].split("##")[0]
+    assert "father's bankruptcies" in fresh and "Builds on: Her father" in fresh
+    assert "forced choice" in md.split("## No-context prompts")[1]
+    assert md.index("## Worn out") < md.index("## Fresh questions") < md.index("## Asked more than once")
+    assert data["suggestions"]["fresh_questions"][0]["builds_on"]
 
-    # second run is served from the extraction cache: only the clustering call repeats
+    # second run is served from the extraction cache: only clustering + suggestions repeat
     fake.calls.clear()
     cli.main(["Jane Ortiz", "--no-search", "--transcripts", str(FIXTURES), "-o", str(out), "--cache-dir", str(tmp_path / "cache")])
-    assert len(fake.calls) == 1
+    assert len(fake.calls) == 2
 
 
 def test_non_interview_dropped(tmp_path):
@@ -276,3 +288,78 @@ def test_ytdlp_opts_cookies():
     assert transcripts.ytdlp_opts(None, "browser:chrome")["cookiesfrombrowser"] == ("chrome",)
     assert transcripts.ytdlp_opts(None, "c.txt")["cookiefile"] == "c.txt"
     assert "cookiefile" not in transcripts.ytdlp_opts(None, None)
+
+
+# ---------------------------------------------------------------- --web
+
+def _resp(content, stop_reason="end_turn"):
+    return SimpleNamespace(content=content, stop_reason=stop_reason)
+
+
+def test_web_discover_resumes_pause_turn_and_caches(tmp_path):
+    from guestprep import web
+
+    report = SimpleNamespace(type="tool_use", name="report_appearances", input={"appearances": [
+        {"url": "https://www.youtube.com/watch?v=AAAAAAAAAAA", "title": "Show", "outlet": "S", "kind": "youtube"},
+        {"url": "https://pod.example/ep1", "title": "Ep 1", "outlet": "Pod", "kind": "transcript_page"},
+        {"url": "https://audio.example/ep", "title": "Audio", "outlet": "A", "kind": "audio_only"},
+        {"url": "not a url", "title": "x", "outlet": "", "kind": "other"},
+    ]})
+    replies = [_resp([SimpleNamespace(type="server_tool_use")], "pause_turn"), _resp([report], "tool_use")]
+    calls = []
+
+    def create(**kw):
+        calls.append(kw)
+        assert kw["tools"][0]["type"] == "web_search_20260209"
+        assert kw["extra_body"] == {"fallbacks": "default"}
+        return replies.pop(0)
+
+    client = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(create=create)))
+    found = web.discover(client, "claude-opus-5-5", "Jane Ortiz", "author", tmp_path)
+    assert len(found) == 3 and len(calls) == 2
+    assert calls[1]["messages"][-1]["role"] == "assistant"  # paused turn echoed back, no extra user message
+    yt, pages, audio = web.split_appearances(found)
+    assert yt == ["https://www.youtube.com/watch?v=AAAAAAAAAAA"]
+    assert [p["url"] for p in pages] == ["https://pod.example/ep1"]
+    assert [a["url"] for a in audio] == ["https://audio.example/ep"]
+    # cached: no further API calls
+    assert web.discover(client, "claude-opus-5-5", "Jane Ortiz", "author", tmp_path) == found
+
+
+def test_web_discover_salvages_urls_from_prose(tmp_path):
+    from guestprep import web
+
+    text = SimpleNamespace(type="text", text="I found https://pod.example/a and (https://pod.example/b).")
+    client = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(create=lambda **kw: _resp([text]))))
+    found = web.discover(client, "m", "X", "", tmp_path)
+    assert [f["url"] for f in found] == ["https://pod.example/a", "https://pod.example/b"]
+
+
+def test_html_to_text_strips_chrome():
+    from guestprep import web
+
+    html = "<html><head><title> Ep 1 | Pod </title><style>x{}</style></head><body><nav>Home About</nav>" \
+           "<p>HOST: How did you start?</p><p>GUEST: By accident.</p><script>evil()</script><footer>(c)</footer></body></html>"
+    title, text = web.html_to_text(html)
+    assert title == "Ep 1 | Pod"
+    assert text == "HOST: How did you start?\nGUEST: By accident."
+
+
+def test_fetch_page_builds_episode(monkeypatch, tmp_path):
+    import requests
+    from guestprep import web
+
+    body = "<p>" + "Q: How did you start? A: It was an accident. " * 60 + "</p>"
+    resp = SimpleNamespace(text=body, headers={"content-type": "text/html"}, raise_for_status=lambda: None)
+    monkeypatch.setattr(requests, "get", lambda url, **kw: resp)
+    video, segs = web.fetch_page({"url": "https://www.pod.example/ep1", "title": "Ep 1", "outlet": ""}, tmp_path)
+    assert video.id.startswith("web:") and video.link(75) == "https://www.pod.example/ep1"
+    assert video.channel == "pod.example"
+    assert segs[0].start is None
+    # too-short pages are rejected
+    resp.text = "<p>Listen on Spotify</p>"
+    assert web.fetch_page({"url": "https://pod.example/short", "title": "", "outlet": ""}, tmp_path) is None
+
+
+def test_web_requires_claude(capsys):
+    assert cli.main(["X", "--web", "--no-llm"]) == 2

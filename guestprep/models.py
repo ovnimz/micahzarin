@@ -15,10 +15,13 @@ class Video:
     # (name in title/description/channel, or found in the transcript).
     confirmed: bool = False
     local_path: str = ""  # set for transcripts supplied from disk
+    page_url: str = ""  # set for web pages found with --web
 
     def link(self, seconds: float | None = None) -> str:
         if self.local_path:
             return self.local_path
+        if self.page_url:
+            return self.page_url
         base = f"https://www.youtube.com/watch?v={self.id}"
         if seconds is not None and seconds > 0:
             return f"{base}&t={int(seconds)}s"

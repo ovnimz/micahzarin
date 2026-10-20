@@ -5,6 +5,7 @@ from dataclasses import asdict
 from datetime import date
 
 from .models import Cluster, Episode, format_timestamp
+from .suggest import Suggestions
 
 
 def _ep_ref(ep_num: dict[str, int], episodes: dict[str, Episode], cluster: Cluster) -> str:
@@ -28,7 +29,14 @@ def _md_escape(s: str) -> str:
     return s.replace("|", "\\|").replace("\n", " ")
 
 
-def render_markdown(guest: str, episodes: list[Episode], clusters: list[Cluster], worn_min: int = 3) -> str:
+def render_markdown(
+    guest: str,
+    episodes: list[Episode],
+    clusters: list[Cluster],
+    worn_min: int = 3,
+    suggestions: Suggestions | None = None,
+    audio_only: list[dict] | None = None,
+) -> str:
     ep_num = {ep.video.id: i for i, ep in enumerate(episodes, 1)}
     by_id = {ep.video.id: ep for ep in episodes}
     n = len(episodes)
@@ -56,6 +64,27 @@ def render_markdown(guest: str, episodes: list[Episode], clusters: list[Cluster]
     else:
         out.append("_Nothing reached this threshold._")
     out.append("")
+
+    if suggestions and suggestions.fresh_questions:
+        out.append("## Fresh questions")
+        out.append("")
+        out.append("Not asked in any interview scanned.")
+        out.append("")
+        for i, s in enumerate(suggestions.fresh_questions, 1):
+            out.append(f"{i}. **{s['question']}**  ")
+            why = s["why"] + (f" _Builds on: {s['builds_on']}._" if s.get("builds_on") else "")
+            out.append(f"   {why}")
+        out.append("")
+
+    if suggestions and suggestions.no_context_prompts:
+        out.append("## No-context prompts")
+        out.append("")
+        out.append("Stand-alone prompts the audience can follow without knowing the guest's work.")
+        out.append("")
+        for i, s in enumerate(suggestions.no_context_prompts, 1):
+            out.append(f"{i}. **{s['prompt']}** _({s['technique']})_  ")
+            out.append(f"   {s['why']}")
+        out.append("")
 
     if repeat:
         out.append("## Asked more than once")
@@ -94,12 +123,28 @@ def render_markdown(guest: str, episodes: list[Episode], clusters: list[Cluster]
         link = f"[{title}]({ep.video.link()})" if not ep.video.local_path else f"{title} (`{ep.video.local_path}`)"
         out.append(f"{i}. {link} · {_md_escape(ep.video.channel)}{dur} · {len(ep.questions)} questions")
     out.append("")
+
+    if audio_only:
+        out.append("## Also found (audio only, not analysed)")
+        out.append("")
+        for a in audio_only:
+            outlet = f" · {_md_escape(a['outlet'])}" if a.get("outlet") else ""
+            out.append(f"- [{_md_escape(a.get('title') or a['url'])}]({a['url']}){outlet}")
+        out.append("")
     return "\n".join(out)
 
 
-def to_json(guest: str, episodes: list[Episode], clusters: list[Cluster]) -> dict:
+def to_json(
+    guest: str,
+    episodes: list[Episode],
+    clusters: list[Cluster],
+    suggestions: Suggestions | None = None,
+    audio_only: list[dict] | None = None,
+) -> dict:
     return {
         "guest": guest,
+        "suggestions": asdict(suggestions) if suggestions else None,
+        "audio_only": audio_only or [],
         "episodes": [
             {
                 "video": asdict(ep.video),
