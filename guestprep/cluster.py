@@ -33,8 +33,9 @@ SCHEMA = {
                     "label": {"type": "string"},
                     "canonical_question": {"type": "string"},
                     "ids": {"type": "array", "items": {"type": "string"}},
+                    "on_topic": {"type": "boolean"},
                 },
-                "required": ["label", "canonical_question", "ids"],
+                "required": ["label", "canonical_question", "ids", "on_topic"],
                 "additionalProperties": False,
             },
         }
@@ -52,13 +53,18 @@ def _index(episodes: list[Episode]) -> dict[str, Question]:
     return ids
 
 
-def cluster_with_claude(client, model: str, guest: str, episodes: list[Episode]) -> list[Cluster]:
+def cluster_with_claude(client, model: str, guest: str, episodes: list[Episode], topic: str = "") -> list[Cluster]:
     ids = _index(episodes)
     if not ids:
         return []
     ep_num = {ep.video.id: i for i, ep in enumerate(episodes, 1)}
     lines = [f"{qid} (interview {ep_num[q.episode_id]}): {q.gist}" for qid, q in ids.items()]
-    user = f"Guest: {guest}\n\nQuestions:\n" + "\n".join(lines)
+    focus = (
+        f"The host's interview will focus on: {topic}. Set on_topic for groups about that topic.\n\n"
+        if topic
+        else "There is no particular focus; set on_topic to true for every group.\n\n"
+    )
+    user = f"Guest: {guest}\n{focus}Questions:\n" + "\n".join(lines)
     data = call_json(client, model=model, system=SYSTEM, user=user, schema=SCHEMA, effort="high", max_tokens=64000)
     if data is None:
         return cluster_heuristic(episodes)
@@ -76,7 +82,12 @@ def _assemble(raw_clusters: list[dict], ids: dict[str, Question]) -> list[Cluste
                 used.add(qid)
                 members.append(ids[qid])
         if members:
-            out.append(Cluster(label=c.get("label", ""), canonical_question=c.get("canonical_question") or members[0].gist, members=members))
+            out.append(Cluster(
+                label=c.get("label", ""),
+                canonical_question=c.get("canonical_question") or members[0].gist,
+                members=members,
+                on_topic=c.get("on_topic", True),
+            ))
     for qid, q in ids.items():
         if qid not in used:
             out.append(Cluster(label=q.topic or q.gist, canonical_question=q.gist, members=[q]))

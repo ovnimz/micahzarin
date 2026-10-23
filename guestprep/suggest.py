@@ -75,7 +75,9 @@ class Suggestions:
     no_context_prompts: list[dict] = field(default_factory=list)
 
 
-def suggest(client, model: str, guest: str, about: str, episodes: list[Episode], clusters: list[Cluster]) -> Suggestions:
+def suggest(
+    client, model: str, guest: str, about: str, episodes: list[Episode], clusters: list[Cluster], topic: str = ""
+) -> Suggestions:
     n = len(episodes)
     asked = "\n".join(f"- ({c.times_asked}/{n}) {c.canonical_question}" for c in clusters)
     threads = "\n".join(f"- {t}" for ep in episodes for t in ep.unexplored_threads) or "(none found)"
@@ -86,6 +88,12 @@ def suggest(client, model: str, guest: str, about: str, episodes: list[Episode],
         + f"\nPrevious interviews:\n{titles}\n"
         + f"\nAlready asked (interviews that asked it / {n}):\n{asked}\n"
         + f"\nThreads nobody followed up on:\n{threads}\n"
+        + (
+            f"\nThe interview will focus on this topic: {topic}. Every fresh question and no-context "
+            "prompt should be about it, drawing on what the guest has said elsewhere that bears on it.\n"
+            if topic
+            else ""
+        )
     )
     data = call_json(client, model=model, system=SYSTEM, user=user, schema=SCHEMA, effort="high")
     if data is None:

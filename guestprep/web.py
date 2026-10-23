@@ -66,14 +66,15 @@ REPORT_TOOL = {
 WEB_SEARCH_TOOL = {"type": "web_search_20260209", "name": "web_search", "max_uses": 15}
 
 
-def discover(client, model: str, guest: str, about: str, cache_dir: Path) -> list[dict]:
-    key = hashlib.sha1(f"{guest}|{about}".lower().encode()).hexdigest()[:12]
+def discover(client, model: str, guest: str, about: str, cache_dir: Path, topic: str = "") -> list[dict]:
+    key = hashlib.sha1(f"{guest}|{about}|{topic}".lower().encode()).hexdigest()[:12]
     cache = cache_dir / "web" / f"discover-{key}.json"
     if cache.exists() and time.time() - cache.stat().st_mtime < DISCOVERY_TTL:
         return json.loads(cache.read_text())
 
     who = f"{guest} ({about})" if about else guest
-    messages: list = [{"role": "user", "content": f"Guest: {who}"}]
+    ask = f"Guest: {who}" + (f"\nPrioritise conversations that touch on: {topic}" if topic else "")
+    messages: list = [{"role": "user", "content": ask}]
     found: list[dict] | None = None
     text_seen: list[str] = []
     for _ in range(6):  # each pause_turn resumes the server-side search loop

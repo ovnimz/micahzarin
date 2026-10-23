@@ -36,19 +36,24 @@ def render_markdown(
     worn_min: int = 3,
     suggestions: Suggestions | None = None,
     audio_only: list[dict] | None = None,
+    topic: str = "",
 ) -> str:
     ep_num = {ep.video.id: i for i, ep in enumerate(episodes, 1)}
     by_id = {ep.video.id: ep for ep in episodes}
     n = len(episodes)
-    worn = [c for c in clusters if c.times_asked >= worn_min]
-    repeat = [c for c in clusters if 2 <= c.times_asked < worn_min]
-    once = [c for c in clusters if c.times_asked < 2]
+    off_topic = [c for c in clusters if not c.on_topic] if topic else []
+    shown = [c for c in clusters if c.on_topic] if topic else clusters
+    worn = [c for c in shown if c.times_asked >= worn_min]
+    repeat = [c for c in shown if 2 <= c.times_asked < worn_min]
+    once = [c for c in shown if c.times_asked < 2]
 
-    out = [f"# Guest prep: {guest}", ""]
+    out = [f"# Guest prep: {guest}" + (f" on {topic}" if topic else ""), ""]
     out.append(
         f"_{date.today().isoformat()} · {n} prior interview{'s' if n != 1 else ''} scanned · "
         f"{sum(len(e.questions) for e in episodes)} questions found · "
-        f"{len(clusters)} distinct questions_"
+        f"{len(clusters)} distinct questions"
+        + (f" ({len(shown)} on {topic})" if topic else "")
+        + "_"
     )
     out.append("")
 
@@ -114,6 +119,15 @@ def render_markdown(
         out.append("</details>")
         out.append("")
 
+    if off_topic:
+        out.append(f"<details><summary>Asked, but not about {_md_escape(topic)} ({len(off_topic)})</summary>")
+        out.append("")
+        for c in off_topic:
+            out.append(f"- {c.canonical_question} · {c.times_asked}/{n} ({_ep_ref(ep_num, by_id, c)})")
+        out.append("")
+        out.append("</details>")
+        out.append("")
+
     out.append("## Interviews scanned")
     out.append("")
     for ep in episodes:
@@ -158,6 +172,7 @@ def to_json(
                 "label": c.label,
                 "canonical_question": c.canonical_question,
                 "times_asked": c.times_asked,
+                "on_topic": c.on_topic,
                 "members": [asdict(q) for q in c.members],
             }
             for c in clusters

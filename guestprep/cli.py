@@ -54,6 +54,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--per-query", type=int, default=15, help="YouTube results per search query (default 15)")
     p.add_argument("--min-minutes", type=float, default=20, help="ignore videos shorter than this; filters out clips (default 20)")
     p.add_argument("--about", default="", help='who the guest is, to rule out namesakes, e.g. "Australian VET and tertiary education policy expert"')
+    p.add_argument("--topic", default="", help='focus the prep sheet on one topic, e.g. "being a person"')
     p.add_argument("--query", action="append", default=[], help="extra YouTube search query (repeatable)")
     p.add_argument("--url", action="append", default=[], help="YouTube URL of a known appearance (repeatable)")
     p.add_argument("--urls-file", type=Path, help="file with one YouTube URL per line")
@@ -90,7 +91,7 @@ def gather_episodes(args: argparse.Namespace) -> tuple[list[Episode], list[dict]
 
     if args.web:
         print(f"Searching the web for {args.guest} (takes a minute or two)...", file=sys.stderr)
-        found = web.discover(make_client(), args.model, args.guest, args.about, args.cache_dir)
+        found = web.discover(make_client(), args.model, args.guest, args.about, args.cache_dir, args.topic)
         yt_urls, pages, audio_only = web.split_appearances(found)
         print(f"  {len(found)} appearances: {len(yt_urls)} YouTube, {len(pages)} pages, {len(audio_only)} audio-only", file=sys.stderr)
         known = {v.id for v in candidates}
@@ -117,7 +118,9 @@ def gather_episodes(args: argparse.Namespace) -> tuple[list[Episode], list[dict]
         print(f"Searching YouTube for {args.guest}...", file=sys.stderr)
         found = discover.search_youtube(
             args.guest, args.per_query, args.min_minutes, args.proxy, args.cookies,
-            args.query + ([f'"{args.guest}" {args.about}'] if args.about else []),
+            args.query
+            + ([f'"{args.guest}" {args.about}'] if args.about else [])
+            + ([f'"{args.guest}" {args.topic}'] if args.topic else []),
         )
         known = {v.id for v in candidates}
         candidates += [v for v in found if v.id not in known]
@@ -202,19 +205,20 @@ def run(args: argparse.Namespace) -> int:
             print("No interviews survived extraction.", file=sys.stderr)
             return 1
         print("Grouping repeat questions across interviews...", file=sys.stderr)
-        clusters = cluster.cluster_with_claude(client, args.model, args.guest, episodes)
+        clusters = cluster.cluster_with_claude(client, args.model, args.guest, episodes, args.topic)
         if not args.no_suggest:
             print("Writing fresh questions...", file=sys.stderr)
-            suggestions = suggest.suggest(client, args.model, args.guest, args.about, episodes, clusters)
+            suggestions = suggest.suggest(client, args.model, args.guest, args.about, episodes, clusters, args.topic)
 
     out = args.out or Path(f"guestprep-{_slug(args.guest)}.md")
     out.write_text(
-        report.render_markdown(args.guest, episodes, clusters, args.worn_min, suggestions, audio_only), encoding="utf-8"
+        report.render_markdown(args.guest, episodes, clusters, args.worn_min, suggestions, audio_only, args.topic),
+        encoding="utf-8",
     )
     out.with_suffix(".json").write_text(
         json.dumps(report.to_json(args.guest, episodes, clusters, suggestions, audio_only), indent=1), encoding="utf-8"
     )
-    worn = sum(c.times_asked >= args.worn_min for c in clusters)
+    worn = sum(c.times_asked >= args.worn_min and c.on_topic for c in clusters)
     print(f"\nWrote {out} ({worn} worn-out questions across {len(episodes)} interviews)", file=sys.stderr)
     return 0
 

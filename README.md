@@ -58,6 +58,7 @@ guestprep "Jane Doe" --transcripts ./transcripts/   # .txt/.vtt/.srt you already
 guestprep "Claire Field" --about "Australian VET and tertiary education policy expert"   # rule out namesakes
 guestprep "Jane Doe" --query '"Jane Doe" Lex Fridman'   # extra search terms
 guestprep "Jane Doe" --web                    # also search podcast sites, written interviews, talks
+guestprep "Jane Doe" --topic "being a person"  # focus the sheet and the fresh questions on one topic
 guestprep "Jane Doe" --no-llm                 # keyword heuristics only, no API key (rough)
 ```
 

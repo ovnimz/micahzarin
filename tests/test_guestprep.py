@@ -363,3 +363,41 @@ def test_fetch_page_builds_episode(monkeypatch, tmp_path):
 
 def test_web_requires_claude(capsys):
     assert cli.main(["X", "--web", "--no-llm"]) == 2
+
+
+# ---------------------------------------------------------------- --topic
+
+def test_topic_filters_report():
+    v1 = Video(id="AAAAAAAAAAA", title="One", channel="S")
+    v2 = Video(id="BBBBBBBBBBB", title="Two", channel="S")
+    q = lambda e, g: Question(e, g, g)
+    eps = [Episode(v1), Episode(v2)]
+    on = Cluster("Self", "Who are you, really?", [q("AAAAAAAAAAA", "a"), q("BBBBBBBBBBB", "a")], on_topic=True)
+    off = Cluster("Growth", "How did you grow your newsletter?", [q("AAAAAAAAAAA", "b"), q("BBBBBBBBBBB", "b")], on_topic=False)
+    md = report.render_markdown("X", eps, [on, off], worn_min=2, topic="being a person")
+    assert md.startswith("# Guest prep: X on being a person")
+    worn = md.split("## Worn out")[1].split("<details>")[0].split("##")[0]
+    assert "Who are you, really?" in worn and "newsletter" not in worn
+    assert "Asked, but not about being a person (1)" in md and "How did you grow your newsletter?" in md
+    # without a topic nothing is hidden
+    md2 = report.render_markdown("X", eps, [on, off], worn_min=2)
+    assert "newsletter" in md2.split("## Worn out")[1].split("##")[0]
+
+
+def test_topic_reaches_cluster_and_suggest_prompts():
+    seen = []
+
+    def stream(**kw):
+        seen.append(kw["messages"][0]["content"])
+        if "Already asked" in kw["messages"][0]["content"]:
+            return FakeStream({"fresh_questions": [], "no_context_prompts": []})
+        return FakeStream({"clusters": [{"label": "L", "canonical_question": "C", "ids": ["e1q1"], "on_topic": False}]})
+
+    client = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(stream=stream)))
+    ep = Episode(Video(id="AAAAAAAAAAA", title="t"), questions=[Question("AAAAAAAAAAA", "q", "g")])
+    clusters = cluster.cluster_with_claude(client, "m", "X", [ep], topic="being a person")
+    assert clusters[0].on_topic is False
+    assert "focus on: being a person" in seen[0]
+    from guestprep import suggest
+    suggest.suggest(client, "m", "X", "", [ep], clusters, topic="being a person")
+    assert "focus on this topic: being a person" in seen[1]

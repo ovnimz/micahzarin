@@ -56,6 +56,7 @@ class Cluster:
     label: str
     canonical_question: str
     members: list[Question]
+    on_topic: bool = True  # only meaningful with --topic
 
     @property
     def episode_ids(self) -> list[str]:
