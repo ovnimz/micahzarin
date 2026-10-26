@@ -66,6 +66,45 @@ REPORT_TOOL = {
 WEB_SEARCH_TOOL = {"type": "web_search_20260209", "name": "web_search", "max_uses": 15}
 
 
+class Refused(RuntimeError):
+    pass
+
+
+def run_until_tool(
+    client, model: str, system: str, user: str, tools: list, tool_name: str,
+    effort: str = "medium", max_tokens: int = 16000, rounds: int = 8,
+) -> tuple[dict | None, list[str]]:
+    """Let Claude use server tools (web search/fetch) until it calls `tool_name`.
+
+    Returns (that tool's input or None, any prose it wrote). Resumes pause_turn,
+    which is how the API hands back a long server-side tool loop.
+    """
+    messages: list = [{"role": "user", "content": user}]
+    text_seen: list[str] = []
+    for _ in range(rounds):
+        resp = client.beta.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            system=system,
+            messages=messages,
+            tools=tools,
+            output_config={"effort": effort},
+            betas=[FALLBACK_BETA],
+            extra_body={"fallbacks": "default"},
+        )
+        if resp.stop_reason == "refusal":
+            raise Refused()
+        for block in resp.content:
+            if block.type == "tool_use" and block.name == tool_name:
+                return dict(block.input), text_seen
+            if block.type == "text":
+                text_seen.append(block.text)
+        if resp.stop_reason != "pause_turn":
+            break
+        messages.append({"role": "assistant", "content": resp.content})
+    return None, text_seen
+
+
 def discover(client, model: str, guest: str, about: str, cache_dir: Path, topic: str = "") -> list[dict]:
     key = hashlib.sha1(f"{guest}|{about}|{topic}".lower().encode()).hexdigest()[:12]
     cache = cache_dir / "web" / f"discover-{key}.json"
@@ -74,31 +113,12 @@ def discover(client, model: str, guest: str, about: str, cache_dir: Path, topic:
 
     who = f"{guest} ({about})" if about else guest
     ask = f"Guest: {who}" + (f"\nPrioritise conversations that touch on: {topic}" if topic else "")
-    messages: list = [{"role": "user", "content": ask}]
-    found: list[dict] | None = None
-    text_seen: list[str] = []
-    for _ in range(6):  # each pause_turn resumes the server-side search loop
-        resp = client.beta.messages.create(
-            model=model,
-            max_tokens=16000,
-            system=SYSTEM,
-            messages=messages,
-            tools=[WEB_SEARCH_TOOL, REPORT_TOOL],
-            output_config={"effort": "medium"},
-            betas=[FALLBACK_BETA],
-            extra_body={"fallbacks": "default"},
-        )
-        if resp.stop_reason == "refusal":
-            print("  web search request was declined; skipping --web", file=sys.stderr)
-            return []
-        for block in resp.content:
-            if block.type == "tool_use" and block.name == "report_appearances":
-                found = list(block.input.get("appearances", []))
-            elif block.type == "text":
-                text_seen.append(block.text)
-        if found is not None or resp.stop_reason != "pause_turn":
-            break
-        messages.append({"role": "assistant", "content": resp.content})
+    try:
+        result, text_seen = run_until_tool(client, model, SYSTEM, ask, [WEB_SEARCH_TOOL, REPORT_TOOL], "report_appearances")
+    except Refused:
+        print("  web search request was declined; skipping --web", file=sys.stderr)
+        return []
+    found = list(result["appearances"]) if result is not None else None
 
     if found is None:
         # Model wrapped up in prose instead of calling the tool: salvage the links.
@@ -172,28 +192,36 @@ def page_id(url: str) -> str:
     return "web:" + hashlib.sha1(url.encode()).hexdigest()[:12]
 
 
-def fetch_page(appearance: dict, cache_dir: Path) -> tuple[Video, list[Segment]] | None:
+def page_text(url: str, cache_dir: Path, quiet: bool = False) -> tuple[str, str] | None:
+    """(title, text) of an HTML page, cached on disk."""
     import requests
 
-    url = appearance["url"]
-    vid = page_id(url)
-    cache = cache_dir / "web" / f"{vid[4:]}.json"
+    cache = cache_dir / "web" / f"{page_id(url)[4:]}.json"
     if cache.exists():
         data = json.loads(cache.read_text())
-        title, text = data["title"], data["text"]
-    else:
-        try:
-            r = requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0 (Macintosh) guestprep/0.1"})
-            r.raise_for_status()
-        except Exception as e:
+        return data["title"], data["text"]
+    try:
+        r = requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0 (Macintosh) guestprep/0.1"})
+        r.raise_for_status()
+    except Exception as e:
+        if not quiet:
             print(f"  couldn't fetch {url}: {e}", file=sys.stderr)
-            return None
-        if "html" not in r.headers.get("content-type", "html"):
-            return None
-        title, text = html_to_text(r.text)
-        cache.parent.mkdir(parents=True, exist_ok=True)
-        cache.write_text(json.dumps({"title": title, "text": text}))
+        return None
+    if "html" not in r.headers.get("content-type", "html"):
+        return None
+    title, text = html_to_text(r.text)
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text(json.dumps({"title": title, "text": text}))
+    return title, text
 
+
+def fetch_page(appearance: dict, cache_dir: Path) -> tuple[Video, list[Segment]] | None:
+    url = appearance["url"]
+    vid = page_id(url)
+    got = page_text(url, cache_dir)
+    if got is None:
+        return None
+    title, text = got
     if len(text) < MIN_PAGE_CHARS:
         return None
     video = Video(

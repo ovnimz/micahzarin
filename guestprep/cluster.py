@@ -53,7 +53,9 @@ def _index(episodes: list[Episode]) -> dict[str, Question]:
     return ids
 
 
-def cluster_with_claude(client, model: str, guest: str, episodes: list[Episode], topic: str = "") -> list[Cluster]:
+def cluster_with_claude(
+    client, model: str, guest: str, episodes: list[Episode], topic: str = "", effort: str = "medium"
+) -> list[Cluster]:
     ids = _index(episodes)
     if not ids:
         return []
@@ -65,7 +67,7 @@ def cluster_with_claude(client, model: str, guest: str, episodes: list[Episode],
         else "There is no particular focus; set on_topic to true for every group.\n\n"
     )
     user = f"Guest: {guest}\n{focus}Questions:\n" + "\n".join(lines)
-    data = call_json(client, model=model, system=SYSTEM, user=user, schema=SCHEMA, effort="high", max_tokens=64000)
+    data = call_json(client, model=model, system=SYSTEM, user=user, schema=SCHEMA, effort=effort, max_tokens=64000)
     if data is None:
         return cluster_heuristic(episodes)
     return _assemble(data.get("clusters", []), ids)

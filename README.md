@@ -24,8 +24,13 @@ guestprep "Morgan Housel"
 4. **Find repeats.** Claude groups the same question asked across different
    shows, even when the wording differs, and ranks the groups by how many
    interviews asked them.
-5. **Write the prep sheet.** `guestprep-morgan-housel.md` (plus a `.json`) has
-   these sections:
+5. **Research a guide.** Claude searches and reads the guest's own writing and
+   talks, then writes their background, a timeline, their main ideas in depth
+   with exact quotes, a reading/listening list in the order to take it, and the
+   main criticisms. Every quote is checked word-for-word against its source;
+   any that can't be found are flagged. (`--no-guide` skips this.)
+6. **Write the prep sheet.** `guestprep-morgan-housel.md` (plus a `.json`) has
+   the guide first, then these sections:
    - **Worn out**: questions asked in 3 or more interviews, with timestamped
      links to each time they were asked
    - **Asked more than once**
@@ -42,8 +47,15 @@ guestprep "Morgan Housel"
 ## Install
 
 ```
-pip install -e .
-export ANTHROPIC_API_KEY=sk-ant-...
+bash install.sh
+```
+
+This installs guestprep and adds two commands to every new Terminal window:
+`guestprep` (from any folder) and `guestprep-update` (download the latest
+version). Run it again any time; it's safe. You also need a Claude API key:
+
+```
+echo 'export ANTHROPIC_API_KEY=sk-ant-...' >> ~/.zshrc
 ```
 
 ## Usage
@@ -59,6 +71,8 @@ guestprep "Claire Field" --about "Australian VET and tertiary education policy e
 guestprep "Jane Doe" --query '"Jane Doe" Lex Fridman'   # extra search terms
 guestprep "Jane Doe" --web                    # also search podcast sites, written interviews, talks
 guestprep "Jane Doe" --topic "being a person"  # focus the sheet and the fresh questions on one topic
+guestprep "Jane Doe" --fast                   # quickest: every step on Sonnet
+guestprep "Jane Doe" --no-guide               # questions only, skip the researched guide
 guestprep "Jane Doe" --no-llm                 # keyword heuristics only, no API key (rough)
 ```
 
@@ -93,6 +107,14 @@ blocked:
   signed in to YouTube
 - `--cookies cookies.txt`: the same thing via an exported cookies file ([how](https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp))
 - `--proxy http://user:pass@host:port`: use a residential proxy
+
+## Speed
+
+Transcripts are read by Claude Sonnet (`--reader-model`) eight at a time,
+starting as each one downloads. The web search runs alongside the YouTube
+search, and the guide is researched while the questions are grouped. Opus
+(`--model`) does the grouping, fresh questions and guide. `--fast` moves those
+to Sonnet too. YouTube downloads stay one at a time to avoid rate limits.
 
 ## Cost
 

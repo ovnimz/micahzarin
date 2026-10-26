@@ -11,7 +11,7 @@ from .llm import call_json
 from .models import Episode, Question, Segment, parse_timestamp
 from .transcripts import to_prompt_text
 
-PROMPT_VERSION = "v2"  # bump to invalidate cached extractions
+PROMPT_VERSION = "v3"  # bump to invalidate cached extractions
 
 SYSTEM = """\
 You are helping a podcast host prepare to interview a guest. You will read a \
@@ -48,6 +48,12 @@ Also list unexplored_threads: specific things the guest brought up in passing \
 up on. Phrase each one so a future interviewer could use it as a starting \
 point. Skip anything the host did explore.
 
+Also list notable_quotes: 5-12 things the guest said that best capture their \
+ideas, beliefs, stories or personality. Copy them exactly as they appear in \
+the transcript; you may fix capitalisation and add punctuation, but do not \
+reword, merge or tidy them. Use "..." only to cut a few filler words. Give \
+the [m:ss] timestamp and a few words on what each quote is about.
+
 Set guest_is_interviewed to false if this is not actually an interview of \
 the named guest (e.g. a solo episode about them, a different person with the \
 same name, a reaction video). If you are told who the guest is, use that to \
@@ -72,13 +78,28 @@ SCHEMA = {
             },
         },
         "unexplored_threads": {"type": "array", "items": {"type": "string"}},
+        "notable_quotes": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "timestamp": {"type": "string"},
+                    "quote": {"type": "string"},
+                    "about": {"type": "string"},
+                },
+                "required": ["timestamp", "quote", "about"],
+                "additionalProperties": False,
+            },
+        },
     },
-    "required": ["guest_is_interviewed", "questions", "unexplored_threads"],
+    "required": ["guest_is_interviewed", "questions", "unexplored_threads", "notable_quotes"],
     "additionalProperties": False,
 }
 
 
-def extract_with_claude(client, model: str, guest: str, episode: Episode, cache_dir: Path, about: str = "") -> bool:
+def extract_with_claude(
+    client, model: str, guest: str, episode: Episode, cache_dir: Path, about: str = "", effort: str = "medium"
+) -> bool:
     """Fill episode.questions / unexplored_threads. Returns False if this isn't a real interview."""
     safe_id = re.sub(r"[^A-Za-z0-9_-]", "_", episode.video.id)
     about_key = hashlib.sha1(about.encode()).hexdigest()[:8] if about else "any"
@@ -94,7 +115,7 @@ def extract_with_claude(client, model: str, guest: str, episode: Episode, cache_
             f"Episode title: {episode.video.title}\n\n"
             f"<transcript>\n{to_prompt_text(episode.segments)}\n</transcript>"
         )
-        data = call_json(client, model=model, system=SYSTEM, user=user, schema=SCHEMA, effort="medium")
+        data = call_json(client, model=model, system=SYSTEM, user=user, schema=SCHEMA, effort=effort)
         if data is None:
             return False
         cache.parent.mkdir(parents=True, exist_ok=True)
@@ -114,6 +135,11 @@ def extract_with_claude(client, model: str, guest: str, episode: Episode, cache_
         if q.get("question", "").strip()
     ]
     episode.unexplored_threads = [t.strip() for t in data.get("unexplored_threads", []) if t.strip()]
+    episode.quotes = [
+        {"quote": q["quote"].strip(), "about": q.get("about", "").strip(), "seconds": parse_timestamp(q.get("timestamp"))}
+        for q in data.get("notable_quotes", [])
+        if q.get("quote", "").strip()
+    ]
     return True
 
 

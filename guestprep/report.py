@@ -5,6 +5,7 @@ from dataclasses import asdict
 from datetime import date
 
 from .models import Cluster, Episode, format_timestamp
+from . import guide as guide_mod
 from .suggest import Suggestions
 
 
@@ -37,6 +38,7 @@ def render_markdown(
     suggestions: Suggestions | None = None,
     audio_only: list[dict] | None = None,
     topic: str = "",
+    guide: dict | None = None,
 ) -> str:
     ep_num = {ep.video.id: i for i, ep in enumerate(episodes, 1)}
     by_id = {ep.video.id: ep for ep in episodes}
@@ -56,6 +58,10 @@ def render_markdown(
         + "_"
     )
     out.append("")
+
+    if guide:
+        out += guide_mod.render(guide)
+        out += ["---", "", "# Questions", ""]
 
     out.append(f"## Worn out: asked in {worn_min}+ interviews")
     out.append("")
@@ -154,9 +160,11 @@ def to_json(
     clusters: list[Cluster],
     suggestions: Suggestions | None = None,
     audio_only: list[dict] | None = None,
+    guide: dict | None = None,
 ) -> dict:
     return {
         "guest": guest,
+        "guide": guide,
         "suggestions": asdict(suggestions) if suggestions else None,
         "audio_only": audio_only or [],
         "episodes": [
@@ -164,6 +172,7 @@ def to_json(
                 "video": asdict(ep.video),
                 "questions": [asdict(q) for q in ep.questions],
                 "unexplored_threads": ep.unexplored_threads,
+                "quotes": ep.quotes,
             }
             for ep in episodes
         ],

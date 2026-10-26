@@ -76,7 +76,8 @@ class Suggestions:
 
 
 def suggest(
-    client, model: str, guest: str, about: str, episodes: list[Episode], clusters: list[Cluster], topic: str = ""
+    client, model: str, guest: str, about: str, episodes: list[Episode], clusters: list[Cluster], topic: str = "",
+    effort: str = "high",
 ) -> Suggestions:
     n = len(episodes)
     asked = "\n".join(f"- ({c.times_asked}/{n}) {c.canonical_question}" for c in clusters)
@@ -95,7 +96,7 @@ def suggest(
             else ""
         )
     )
-    data = call_json(client, model=model, system=SYSTEM, user=user, schema=SCHEMA, effort="high")
+    data = call_json(client, model=model, system=SYSTEM, user=user, schema=SCHEMA, effort=effort)
     if data is None:
         return Suggestions()
     return Suggestions(data.get("fresh_questions", []), data.get("no_context_prompts", []))

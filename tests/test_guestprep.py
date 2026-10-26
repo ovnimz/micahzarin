@@ -140,11 +140,20 @@ class FakeClient:
     def __init__(self, extractions):
         self.extractions = extractions
         self.calls = []
-        self.beta = SimpleNamespace(messages=SimpleNamespace(stream=self._stream))
+        self.creates = []
+        self.beta = SimpleNamespace(messages=SimpleNamespace(stream=self._stream, create=self._create))
+
+    def _create(self, **kw):
+        self.creates.append(kw)
+        assert kw["tools"][-1]["name"] == "submit_guide"
+        block = SimpleNamespace(type="tool_use", name="submit_guide", input=GUIDE)
+        return SimpleNamespace(content=[block], stop_reason="tool_use")
 
     def _stream(self, **kw):
         self.calls.append(kw)
-        assert kw["model"] == "claude-opus-5-5"
+        user_ = kw["messages"][0]["content"]
+        # transcripts are read by the fast model; grouping/suggestions use the main one
+        assert kw["model"] in ("claude-sonnet-5-5", "claude-opus-5-5")
         assert kw["extra_body"] == {"fallbacks": "default"}
         assert kw["output_config"]["format"]["type"] == "json_schema"
         user = kw["messages"][0]["content"]
@@ -167,6 +176,22 @@ class FakeClient:
 def _q(ts, gist, topic="origin"):
     return {"timestamp": ts, "question": gist + " (as asked)", "gist": gist, "topic": topic}
 
+
+GUIDE = {
+    "summary": "Jane Ortiz is a nurse turned money writer.",
+    "background": "Para one.\n\nPara two.",
+    "timeline": [{"when": "2015", "what": "Started a debt blog"}],
+    "ideas": [{
+        "name": "Slow money",
+        "explanation": "Getting rich slowly.",
+        "quotes": [
+            {"quote": "I was a hospital nurse and I started a blog about my debt.", "source_title": "Ep 1", "source_url": "tests/fixtures/ep1.txt"},
+            {"quote": "Money is a feeling, not a number.", "source_title": "Made up", "source_url": "about:blank"},
+        ],
+    }],
+    "reading_list": [{"title": "Slow Money", "url": "https://example.com/book", "kind": "book", "background_needed": "none", "why": "Her main book."}],
+    "criticisms": [{"point": "Too cautious.", "source_url": "https://example.com/crit"}],
+}
 
 SUGGESTIONS = {
     "fresh_questions": [{"question": "What did your father's bankruptcies teach you?", "why": "Raised, never explored.", "builds_on": "Her father went bankrupt twice"}],
@@ -196,16 +221,31 @@ def test_claude_pipeline_end_to_end(tmp_path, monkeypatch):
     # every extracted question lands in exactly one cluster despite the bad ids
     assert sum(len(c["members"]) for c in data["clusters"]) == 7
     assert len(fake.calls) == 5
+    # transcripts are read by the fast model; grouping and suggestions use the main one
+    for kw in fake.calls:
+        reading = "<transcript>" in kw["messages"][0]["content"]
+        assert kw["model"] == ("claude-sonnet-5-5" if reading else "claude-opus-5-5")
+    assert fake.creates[0]["model"] == "claude-opus-5-5"
     fresh = md.split("## Fresh questions")[1].split("##")[0]
     assert "father's bankruptcies" in fresh and "Builds on: Her father" in fresh
     assert "forced choice" in md.split("## No-context prompts")[1]
     assert md.index("## Worn out") < md.index("## Fresh questions") < md.index("## Asked more than once")
     assert data["suggestions"]["fresh_questions"][0]["builds_on"]
 
-    # second run is served from the extraction cache: only clustering + suggestions repeat
+    # guide: rendered before the questions, real quote verified, invented one flagged
+    assert md.index("## Who they are") < md.index("## Their ideas") < md.index("# Questions") < md.index("## Worn out")
+    assert "Para two." in md and "**2015**: Started a debt blog" in md
+    assert "1. **[Slow Money](https://example.com/book)** _(book)_" in md
+    ideas = md.split("## Their ideas")[1].split("## What to read")[0]
+    real, fake_q = ideas.split("> \"I was a hospital nurse")[1], ideas.split("> \"Money is a feeling")[1]
+    assert "couldn't find" not in real.split("> \"Money")[0]
+    assert "couldn't find this exact wording" in fake_q
+    assert len(fake.creates) == 1
+
+    # second run is served from the caches: only clustering + suggestions repeat
     fake.calls.clear()
     cli.main(["Jane Ortiz", "--no-search", "--transcripts", str(FIXTURES), "-o", str(out), "--cache-dir", str(tmp_path / "cache")])
-    assert len(fake.calls) == 2
+    assert len(fake.calls) == 2 and len(fake.creates) == 1
 
 
 def test_non_interview_dropped(tmp_path):
@@ -401,3 +441,34 @@ def test_topic_reaches_cluster_and_suggest_prompts():
     from guestprep import suggest
     suggest.suggest(client, "m", "X", "", [ep], clusters, topic="being a person")
     assert "focus on this topic: being a person" in seen[1]
+
+
+
+# ---------------------------------------------------------------- guide
+
+def test_quote_matching():
+    from guestprep.guide import _norm, quote_in
+
+    text = _norm("So honestly, I don\u2019t think nothing matters. Which means everything does, right? Yeah.")
+    assert quote_in("I don't think nothing matters.", text)
+    assert quote_in("i dont think nothing matters ... which means everything does", text)
+    assert not quote_in("I think nothing matters, which means everything does", text)  # reworded
+    assert not quote_in("Yeah.", text)  # too short to check
+
+
+def test_extraction_keeps_quotes(tmp_path):
+    payload = dict(EXTRACTIONS["ep1"], notable_quotes=[{"timestamp": "1:10", "quote": "It was an accident.", "about": "origin"}])
+    fake = FakeClient({"ep1": payload})
+    ep = _local_episodes()[0]
+    extract.extract_with_claude(fake, "claude-opus-5-5", "Jane Ortiz", ep, tmp_path)
+    assert ep.quotes == [{"quote": "It was an accident.", "about": "origin", "seconds": 70.0}]
+
+
+def test_fast_uses_reader_model_everywhere(tmp_path, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
+    fake = FakeClient(EXTRACTIONS)
+    monkeypatch.setattr(cli, "make_client", lambda: fake)
+    rc = cli.main(["Jane Ortiz", "--fast", "--no-search", "--transcripts", str(FIXTURES),
+                   "-o", str(tmp_path / "p.md"), "--cache-dir", str(tmp_path / "c")])
+    assert rc == 0
+    assert {kw["model"] for kw in fake.calls + fake.creates} == {"claude-sonnet-5-5"}

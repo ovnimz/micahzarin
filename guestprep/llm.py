@@ -5,6 +5,8 @@ import json
 import sys
 
 DEFAULT_MODEL = "claude-opus-5-5"
+# Bulk reading (one call per transcript) and web discovery: faster and cheaper.
+FAST_MODEL = "claude-sonnet-5-5"
 # Server-side refusal fallback: if the model's safety classifier declines,
 # the API retries on Anthropic's recommended fallback model in the same call.
 FALLBACK_BETA = "server-side-fallback-2026-07-01"

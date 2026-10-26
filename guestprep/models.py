@@ -49,6 +49,8 @@ class Episode:
     segments: list[Segment] = field(default_factory=list)
     questions: list[Question] = field(default_factory=list)
     unexplored_threads: list[str] = field(default_factory=list)
+    # The guest's own words worth quoting: {"quote", "about", "seconds"}
+    quotes: list[dict] = field(default_factory=list)
 
 
 @dataclass
