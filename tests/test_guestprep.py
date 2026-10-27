@@ -472,3 +472,43 @@ def test_fast_uses_reader_model_everywhere(tmp_path, monkeypatch):
                    "-o", str(tmp_path / "p.md"), "--cache-dir", str(tmp_path / "c")])
     assert rc == 0
     assert {kw["model"] for kw in fake.calls + fake.creates} == {"claude-sonnet-5-5"}
+
+
+# ---------------------------------------------------------------- --writing
+
+def test_pick_posts_keeps_newest_and_most_liked():
+    from guestprep.writing import pick_posts
+
+    posts = [{"url": f"u{i}", "date": f"2026-01-{30 - i:02d}", "likes": l} for i, l in enumerate([1, 2, 3, 4, 5, 99, 0, 50])]
+    picked = pick_posts(posts, 7)
+    urls = [p["url"] for p in picked]
+    assert {"u0", "u1", "u2", "u3", "u4"} <= set(urls) and "u5" in urls and "u7" in urls
+    assert urls == sorted(urls, key=lambda u: int(u[1:]))  # newest first
+
+
+def test_writing_only_run(tmp_path, monkeypatch):
+    """No interviews found, but the guest's Substack still yields a guide and questions."""
+    import requests
+    from guestprep import writing as writing_mod
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
+    archive = [{"title": "Slow money", "subtitle": "why", "canonical_url": "https://jane.substack.com/p/slow", "post_date": "2026-01-01T00:00:00Z", "reaction_count": 9, "audience": "everyone", "type": "newsletter"}]
+    body = "<p>I was a hospital nurse and I started a blog about my debt. " + "More words here. " * 200 + "</p>"
+
+    def get(url, params=None, **kw):
+        if url.endswith("/api/v1/archive"):
+            return SimpleNamespace(status_code=200, json=lambda: archive if params["offset"] == 0 else [])
+        return SimpleNamespace(text=body, headers={"content-type": "text/html"}, raise_for_status=lambda: None)
+
+    monkeypatch.setattr(requests, "get", get)
+    fake = FakeClient({})
+    monkeypatch.setattr(cli, "make_client", lambda: fake)
+    out = tmp_path / "p.md"
+    rc = cli.main(["Jane Ortiz", "--no-search", "--writing", "https://jane.substack.com", "-o", str(out), "--cache-dir", str(tmp_path / "c")])
+    assert rc == 0
+    guide_prompt = fake.creates[0]["messages"][0]["content"]
+    assert "The guest's own writing" in guide_prompt and "url: https://jane.substack.com/p/slow" in guide_prompt
+    md = out.read_text()
+    # the GUIDE fixture's real quote is found in the Substack post, so it's verified
+    assert "## Fresh questions" in md and "Slow money" in [l for l in fake.calls if "Already asked" in l["messages"][0]["content"]][0]["messages"][0]["content"]
+    assert md.split('> "I was a hospital nurse')[1].split("\n\n")[0].count("couldn't find") == 0

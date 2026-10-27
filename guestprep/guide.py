@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 
 from . import web
+from . import writing as writing_mod
 from .discover import video_id_from_url
 from .models import Episode, format_timestamp
 
@@ -26,7 +27,9 @@ the criticisms or debates around them. Read primary sources (their own \
 writing and talks) where you can, not just profiles.
 
 You are also given quotes from the guest's previous interviews, each with \
-its source link.
+its source link, and, when available, the guest's own writing (blog or \
+Substack posts). Treat that writing as the primary source: build the ideas \
+section mainly from it, quote it, and put the best pieces in the reading list.
 
 Write:
 - summary: 2-3 sentences on who they are and why they matter.
@@ -134,8 +137,10 @@ TOOLS = [
 def build_guide(
     client, model: str, guest: str, about: str, topic: str, episodes: list[Episode], cache_dir: Path,
     effort: str = "high",
+    writing: list[dict] | None = None,
 ) -> dict | None:
-    ep_key = ",".join(sorted(ep.video.id for ep in episodes))
+    writing = writing or []
+    ep_key = ",".join(sorted(ep.video.id for ep in episodes) + sorted(w["url"] for w in writing))
     key = hashlib.sha1(f"{guest}|{about}|{topic}|{ep_key}|{model}".lower().encode()).hexdigest()[:12]
     cache = cache_dir / "guide" / f"{key}.json"
     if cache.exists() and time.time() - cache.stat().st_mtime < GUIDE_TTL:
@@ -155,6 +160,7 @@ def build_guide(
             + (f"The interview will focus on: {topic}. Weight the ideas and reading list toward it.\n" if topic else "")
             + "\nQuotes from their previous interviews:\n"
             + ("\n".join(lines) or "(none)")
+            + (f"\n\nThe guest's own writing:\n\n{writing_mod.for_prompt(writing)}" if writing else "")
         )
         try:
             guide, _ = web.run_until_tool(client, model, SYSTEM, user, TOOLS, "submit_guide", effort=effort, max_tokens=32000, rounds=12)
@@ -166,7 +172,7 @@ def build_guide(
             return None
         cache.parent.mkdir(parents=True, exist_ok=True)
         cache.write_text(json.dumps(guide, indent=1))
-    verify_quotes(guide, episodes, cache_dir)
+    verify_quotes(guide, episodes, cache_dir, writing)
     return guide
 
 
@@ -184,9 +190,10 @@ def quote_in(quote: str, text_norm: str) -> bool:
     return bool(parts) and all(p in text_norm for p in parts)
 
 
-def verify_quotes(guide: dict, episodes: list[Episode], cache_dir: Path) -> None:
-    """Mark each quote verified=True/False by finding it in its source (or any transcript we read)."""
+def verify_quotes(guide: dict, episodes: list[Episode], cache_dir: Path, writing: list[dict] | None = None) -> None:
+    """Mark each quote verified=True/False by finding it in its source (or any transcript/post we read)."""
     transcripts = {ep.video.id: _norm(" ".join(s.text for s in ep.segments)) for ep in episodes}
+    transcripts.update({w["url"]: _norm(w["text"]) for w in writing or []})
     by_url = {}
     for ep in episodes:
         for u in (ep.video.url, ep.video.page_url):
@@ -195,7 +202,7 @@ def verify_quotes(guide: dict, episodes: list[Episode], cache_dir: Path) -> None
     pages: dict[str, str | None] = {}
 
     def source_text(url: str) -> str | None:
-        vid = by_url.get(url.split("#")[0]) or (video_id_from_url(url) if "youtu" in url else None)
+        vid = by_url.get(url.split("#")[0]) or (video_id_from_url(url) if "youtu" in url else None) or url
         if vid in transcripts:
             return transcripts[vid]
         if url not in pages:

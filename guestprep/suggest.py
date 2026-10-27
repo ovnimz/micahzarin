@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .llm import call_json
+from .writing import titles as writing_titles
 from .models import Cluster, Episode
 
 SYSTEM = """\
@@ -78,6 +79,7 @@ class Suggestions:
 def suggest(
     client, model: str, guest: str, about: str, episodes: list[Episode], clusters: list[Cluster], topic: str = "",
     effort: str = "high",
+    writing: list[dict] | None = None,
 ) -> Suggestions:
     n = len(episodes)
     asked = "\n".join(f"- ({c.times_asked}/{n}) {c.canonical_question}" for c in clusters)
@@ -89,6 +91,7 @@ def suggest(
         + f"\nPrevious interviews:\n{titles}\n"
         + f"\nAlready asked (interviews that asked it / {n}):\n{asked}\n"
         + f"\nThreads nobody followed up on:\n{threads}\n"
+        + (f"\nTheir own writing (draw on specific posts):\n{writing_titles(writing)}\n" if writing else "")
         + (
             f"\nThe interview will focus on this topic: {topic}. Every fresh question and no-context "
             "prompt should be about it, drawing on what the guest has said elsewhere that bears on it.\n"

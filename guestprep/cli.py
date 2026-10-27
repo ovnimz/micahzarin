@@ -10,7 +10,7 @@ import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 
-from . import cluster, discover, extract, guide, report, suggest, transcripts, web
+from . import cluster, discover, extract, guide, report, suggest, transcripts, web, writing
 from .llm import DEFAULT_MODEL, FAST_MODEL, LLMError, make_client
 from .models import Episode
 
@@ -61,6 +61,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--no-search", action="store_true", help="only use --url / --urls-file / --transcripts (and --web)")
     p.add_argument("--web", action="store_true", help="also search the whole web (podcast sites, written interviews, talks) with Claude")
     p.add_argument("--no-suggest", action="store_true", help="skip writing fresh questions and no-context prompts")
+    p.add_argument("--writing", action="append", default=[], metavar="URL",
+                   help="the guest's Substack (whole archive) or a post/blog URL; repeatable")
+    p.add_argument("--max-posts", type=int, default=25, help="posts to read per Substack (default 25)")
     p.add_argument("--no-guide", action="store_true", help="skip the researched guide (bio, ideas, quotes, reading list)")
     p.add_argument("--transcripts", type=Path, help="directory of transcripts you already have (.txt .vtt .srt .json3)")
     p.add_argument("--cookies-from-browser", metavar="BROWSER", help="use YouTube login cookies from chrome / safari / firefox / edge / brave")
@@ -226,27 +229,33 @@ def run(args: argparse.Namespace) -> int:
 
         with ThreadPoolExecutor(max_workers=8) as pool:
             pending: list[Future] = []
+            posts_job = None
+            if args.writing:
+                print("Reading their writing in the background...", file=sys.stderr)
+                posts_job = pool.submit(writing.collect, args.writing, args.cache_dir, args.max_posts)
             episodes, audio_only = gather_episodes(args, on_episode=lambda ep: pending.append(pool.submit(work, ep)))
-            if not episodes:
-                print("No usable interviews found yet.", file=sys.stderr)
-                return 1
             print(f"Reading {len(episodes)} interview(s)...", file=sys.stderr)
             episodes = [ep for ep in (f.result() for f in pending) if ep is not None]
-            if not episodes:
-                print("No interviews survived extraction.", file=sys.stderr)
+            posts = posts_job.result() if posts_job else []
+            if posts:
+                print(f"  {len(posts)} pieces of their writing", file=sys.stderr)
+            if not episodes and not posts:
+                print("No usable interviews (or writing) found.", file=sys.stderr)
                 return 1
 
             guide_job = None
             if not args.no_guide:
                 print("Researching the guide in the background (background, ideas, quotes, reading list)...", file=sys.stderr)
                 guide_job = pool.submit(
-                    guide.build_guide, client, model, args.guest, args.about, args.topic, episodes, args.cache_dir, effort
+                    guide.build_guide, client, model, args.guest, args.about, args.topic, episodes, args.cache_dir, effort, posts
                 )
             print("Grouping repeat questions across interviews...", file=sys.stderr)
             clusters = cluster.cluster_with_claude(client, model, args.guest, episodes, args.topic, effort="medium")
             if not args.no_suggest:
                 print("Writing fresh questions...", file=sys.stderr)
-                suggestions = suggest.suggest(client, model, args.guest, args.about, episodes, clusters, args.topic, effort)
+                suggestions = suggest.suggest(
+                    client, model, args.guest, args.about, episodes, clusters, args.topic, effort, posts
+                )
             if guide_job is not None:
                 print("Finishing the guide...", file=sys.stderr)
                 guide_data = guide_job.result()

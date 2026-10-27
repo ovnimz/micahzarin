@@ -71,6 +71,7 @@ guestprep "Claire Field" --about "Australian VET and tertiary education policy e
 guestprep "Jane Doe" --query '"Jane Doe" Lex Fridman'   # extra search terms
 guestprep "Jane Doe" --web                    # also search podcast sites, written interviews, talks
 guestprep "Jane Doe" --topic "being a person"  # focus the sheet and the fresh questions on one topic
+guestprep "Jane Doe" --writing https://jane.substack.com   # read their Substack (or any post URL)
 guestprep "Jane Doe" --fast                   # quickest: every step on Sonnet
 guestprep "Jane Doe" --no-guide               # questions only, skip the researched guide
 guestprep "Jane Doe" --no-llm                 # keyword heuristics only, no API key (rough)
@@ -80,6 +81,12 @@ guestprep "Jane Doe" --no-llm                 # keyword heuristics only, no API 
 a published transcript or a written Q&A are analysed like YouTube transcripts.
 YouTube links it finds are added to the YouTube list. Audio-only episodes are
 listed at the end of the prep sheet. Results are cached for a week.
+
+`--writing` takes a Substack address (it reads up to `--max-posts` posts: the
+newest five plus the most-liked) or individual article URLs, and can be given
+several times. The guide treats that writing as its main source, quotes from it
+(checked word for word), and the fresh questions draw on specific posts. It
+works even when the guest has few or no recorded interviews.
 
 `--transcripts` covers podcasts that aren't on YouTube. Many shows publish
 transcripts on their websites; save them as `.txt` files. Lines may start with
