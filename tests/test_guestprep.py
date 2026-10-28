@@ -512,3 +512,16 @@ def test_writing_only_run(tmp_path, monkeypatch):
     # the GUIDE fixture's real quote is found in the Substack post, so it's verified
     assert "## Fresh questions" in md and "Slow money" in [l for l in fake.calls if "Already asked" in l["messages"][0]["content"]][0]["messages"][0]["content"]
     assert md.split('> "I was a hospital nurse')[1].split("\n\n")[0].count("couldn't find") == 0
+
+
+def test_substack_archive_pages_past_short_pages(monkeypatch, tmp_path):
+    """Substack can return a short page mid-archive; keep paging until an empty one."""
+    import requests
+    from guestprep import writing as writing_mod
+
+    def post(i):
+        return {"title": f"P{i}", "canonical_url": f"https://x.substack.com/p/{i}", "post_date": f"2026-01-{i:02d}T00:00:00Z", "type": "newsletter"}
+    pages = {0: [post(i) for i in range(1, 24)], 23: [post(i) for i in range(23, 31)], 31: []}  # overlap at 23
+    monkeypatch.setattr(requests, "get", lambda url, params=None, **kw: SimpleNamespace(status_code=200, json=lambda: pages[params["offset"]]))
+    posts = writing_mod._substack_archive("https://x.substack.com", tmp_path, 25)
+    assert len(posts) == 30 and len({p["url"] for p in posts}) == 30

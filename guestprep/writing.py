@@ -21,12 +21,20 @@ def _substack_archive(base: str, cache_dir: Path, limit: int) -> list[dict] | No
     if cache.exists():
         return json.loads(cache.read_text())
     posts: list[dict] = []
+    seen: set[str] = set()
+    offset = 0
     try:
-        for offset in range(0, max(limit * 3, 50), 50):
+        # Pages can come back shorter than asked even mid-archive, so page until one is empty.
+        while offset < 2000:
             r = requests.get(f"{base}/api/v1/archive", params={"sort": "new", "offset": offset, "limit": 50}, timeout=20)
             if r.status_code != 200 or not isinstance(r.json(), list):
                 return None if not posts else posts
             batch = r.json()
+            if not batch:
+                break
+            offset += len(batch)
+            batch = [p for p in batch if p.get("canonical_url") not in seen]
+            seen.update(p.get("canonical_url") for p in batch)
             posts += [
                 {
                     "title": p.get("title") or "",
@@ -39,8 +47,6 @@ def _substack_archive(base: str, cache_dir: Path, limit: int) -> list[dict] | No
                 for p in batch
                 if p.get("type", "newsletter") == "newsletter" and p.get("canonical_url")
             ]
-            if len(batch) < 50:
-                break
     except (requests.RequestException, ValueError):
         return None
     cache.parent.mkdir(parents=True, exist_ok=True)
