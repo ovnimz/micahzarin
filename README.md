@@ -185,31 +185,42 @@ For your most recent 50 long-form videos (`-n` to change):
    - The data: every video in a table, the audience, and which traits go with
      better numbers
 
-It writes `channelscope-<channel>.md` with a `-thumbnails/` folder, a `.csv`
+It writes `channelscope-<channel>.html` (open it in your browser) and the same report as `.md`, with a `-thumbnails/` folder, a `.csv`
 (one row per video, opens in Excel/Numbers), a `.json` with everything, and
 `-data.md`. The last one is the summary Claude worked from: paste it into a
 Claude chat to ask your own follow-up questions.
 
-## One-time Google setup
+## Setup (one command)
 
-YouTube analytics need your permission, which goes through a Google Cloud
-project you own (free):
+```
+bash setup-channelscope.sh
+```
 
-1. Go to [console.cloud.google.com](https://console.cloud.google.com/) and
-   create a project (any name).
-2. **APIs & Services > Library**: enable **YouTube Data API v3**, **YouTube
-   Analytics API** and **YouTube Reporting API**.
-3. **APIs & Services > OAuth consent screen**: choose External, fill in an
-   app name and your email, and add your Google account as a test user.
-4. **APIs & Services > Credentials > Create credentials > OAuth client ID**,
-   type **Desktop app**. Download the JSON and save it as
-   `~/.config/channelscope/client_secret.json`.
+Run it from this folder (after `bash install.sh`, it's also `channelscope-setup` from anywhere). It
+installs everything and saves your Claude key. It creates a Google Cloud project with the YouTube APIs
+turned on and lets you add your Studio CSV for CTR. It ends by writing your first report and opening it
+in your browser. It's safe to run again: finished steps are skipped.
 
-The first run opens a browser to sign in. If your channel is a Brand Account,
-pick the channel there. The sign-in is saved. While the consent screen is in
-"Testing", Google expires it after 7 days and the browser opens again; click
-**Publish app** on the consent screen to stop that. Since you're the only user,
-Google doesn't need to review it.
+Google doesn't let scripts create the OAuth client (the sign-in key), so for about two minutes the
+script opens three Google Cloud pages one at a time. It tells you exactly what to click on each, then
+picks up the downloaded key from your Downloads folder by itself. `bash setup-channelscope.sh --reset`
+starts over.
+
+<details><summary>Doing it by hand instead</summary>
+
+1. Go to [console.cloud.google.com](https://console.cloud.google.com/) and create a project.
+2. **APIs & Services > Library**: turn on **YouTube Data API v3**, **YouTube Analytics API** and
+   **YouTube Reporting API**.
+3. **Google Auth Platform > Get started**: name the app, choose External, and add your email.
+   Under **Audience**, add yourself as a test user and click **Publish app**. Otherwise Google
+   makes you sign in again every 7 days.
+4. **Clients > Create client > Desktop app**. Download the JSON and save it as
+   `~/.config/channelscope/client_secret.json`. Google shows the secret only once.
+
+On the first run a browser opens to sign in. Pick your channel; if it's a Brand Account, pick that
+Brand Account. On "Google hasn't verified this app", click Continue: it's your own app.
+
+</details>
 
 ## Impressions and CTR
 
@@ -226,7 +237,9 @@ There are two ways to get them:
   reach report through the Reporting API. Reports take up to 48 hours to
   appear and only cover days after that, so CTR builds up with each run.
 
-When both exist for a video, the Studio export wins.
+When both exist for a video, the Studio export wins. The setup script saves your export to
+`~/.config/channelscope/studio.csv`, and channelscope uses that file automatically. Rerun the setup to
+refresh it.
 
 ## Usage
 

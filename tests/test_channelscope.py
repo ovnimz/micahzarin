@@ -282,6 +282,7 @@ def fake_google(monkeypatch, tmp_path):
     from PIL import Image
 
     ya, yr = FakeYA(), FakeYR()
+    monkeypatch.setattr(auth, "CONFIG_DIR", tmp_path / "config")
     monkeypatch.setattr(auth, "credentials", lambda *a: object())
     monkeypatch.setattr(auth, "services", lambda creds: (FakeYT(), ya, yr))
 
@@ -320,11 +321,23 @@ def test_run_numbers_only(fake_google, tmp_path):
     assert (out.parent / "report-thumbnails").is_dir()
     assert out.with_suffix(".csv").read_text().count("\n") == 9
     assert "Top countries" in out.with_name("report-data.md").read_text()
+    page = out.with_suffix(".html").read_text()
+    assert page.startswith("<!doctype html>") and "<table>" in page and "prefers-color-scheme: dark" in page
     # second run reads per-video analytics from cache
     n = len(fake_google.ya.calls)
     out.unlink()
     assert cli.run(args) == 0
     assert len(fake_google.ya.calls) - n == 1  # only the batched totals query
+
+
+def test_saved_studio_export_is_used(fake_google, tmp_path):
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "studio.csv").write_text(
+        "Content,Impressions,Impressions click-through rate (%)\n" + "".join(f"{v},1000,4\n" for v in VIDEO_IDS))
+    args, out = _args(tmp_path, "--no-llm", "--no-reach")
+    assert cli.run(args) == 0
+    data = json.loads(out.with_suffix(".json").read_text())
+    assert all(v["ctr"] == pytest.approx(0.04) for v in data["videos"])
 
 
 def test_run_with_studio_csv_and_limits(fake_google, tmp_path):

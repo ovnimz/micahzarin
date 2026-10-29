@@ -156,7 +156,14 @@ def gather(args) -> dict:
 
     notes: list[str] = []
     studio: dict[str, dict] = {}
-    for path in args.studio_csv:
+    csvs = list(args.studio_csv)
+    saved = auth.CONFIG_DIR / "studio.csv"  # left there by setup-channelscope.sh
+    if not csvs and saved.exists():
+        csvs = [saved]
+        age = (time.time() - saved.stat().st_mtime) / 86400
+        if age > 30:
+            notes.append(f"CTR comes from a Studio export {age:.0f} days old; rerun setup-channelscope.sh to refresh it.")
+    for path in csvs:
         studio.update(reach.read_studio_csv(path))
     api_reach: dict[str, dict] = {}
     if not args.no_reach:
@@ -262,10 +269,9 @@ def run(args) -> int:
 
     out = args.out or Path(f"channelscope-{_slug(channel['title'])}.md")
     thumbs = report.copy_thumbnails(videos, out.parent / f"{out.stem}-thumbnails")
-    out.write_text(
-        report.render_markdown(channel, g["audience"], videos, scores, lifts, plan, thumbs, g["notes"], args.next),
-        encoding="utf-8",
-    )
+    md = report.render_markdown(channel, g["audience"], videos, scores, lifts, plan, thumbs, g["notes"], args.next)
+    out.write_text(md, encoding="utf-8")
+    out.with_suffix(".html").write_text(report.render_html(md, channel["title"]), encoding="utf-8")
     out.with_suffix(".json").write_text(
         json.dumps(report.to_json(channel, g["audience"], videos, scores, lifts, plan), indent=1, default=str),
         encoding="utf-8",
@@ -274,7 +280,7 @@ def run(args) -> int:
     # The same summary Claude saw, for asking your own follow-up questions in a chat.
     dossier = strategy.build_dossier(channel, g["audience"], videos, scores, lifts, g["related"], g["excluded"])
     out.with_name(f"{out.stem}-data.md").write_text(dossier, encoding="utf-8")
-    print(f"\nWrote {out} (+ .json, .csv, -data.md)", file=sys.stderr)
+    print(f"\nWrote {out.with_suffix('.html')} (+ .md, .json, .csv, -data.md)", file=sys.stderr)
     return 0
 
 

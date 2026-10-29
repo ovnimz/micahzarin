@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import html
 import shutil
 from dataclasses import asdict
 from datetime import date
@@ -285,3 +286,31 @@ def to_json(channel, audience, videos, scores, lifts, strategy) -> dict:
             for i, v in enumerate(videos, 1)
         ],
     }
+
+
+HTML_STYLE = """
+:root { --bg: #fff; --fg: #1d1d1f; --muted: #6e6e73; --line: #e5e5ea; --accent: #0a66c2; --soft: #f5f5f7; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #161618; --fg: #f2f2f7; --muted: #a1a1a6; --line: #333336; --accent: #6cb4ff; --soft: #222225; }
+}
+body { background: var(--bg); color: var(--fg); font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+       max-width: 1100px; margin: 0 auto; padding: 24px 16px 80px; }
+h1 { font-size: 1.9em; line-height: 1.2; } h2 { margin-top: 2.2em; padding-top: .6em; border-top: 1px solid var(--line); }
+a { color: var(--accent); } em { color: var(--muted); }
+blockquote { margin: 1em 0; padding: .6em 1em; background: var(--soft); border-left: 3px solid var(--accent); border-radius: 4px; }
+.table { overflow-x: auto; } table { border-collapse: collapse; font-size: .9em; margin: 1em 0; }
+th, td { border-bottom: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; }
+th { background: var(--soft); position: sticky; top: 0; } img { max-width: 240px; height: auto; border-radius: 6px; }
+"""
+
+
+def render_html(markdown_text: str, title: str) -> str:
+    """The same report as a page that opens in any browser."""
+    import markdown
+
+    body = markdown.markdown(markdown_text, extensions=["tables", "sane_lists"])
+    body = body.replace("<table>", '<div class="table"><table>').replace("</table>", "</table></div>")
+    return (
+        f'<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">'
+        f"<title>{html.escape(title)}: channelscope</title><style>{HTML_STYLE}</style></head><body>{body}</body></html>\n"
+    )
