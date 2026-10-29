@@ -4,6 +4,7 @@
 #
 #   bash setup-channelscope.sh           # set up (or finish setting up) and run
 #   bash setup-channelscope.sh --reset   # forget the Google project + sign-in and start over
+#   bash setup-channelscope.sh --new-key # replace the saved Claude API key
 #
 # Google doesn't allow the OAuth client (the "sign-in key" channelscope uses)
 # to be created by a script, so for that part this opens the right page and
@@ -51,16 +52,18 @@ wait_for_download() {
   local patterns="$1" marker="$2" found="" line="" p
   echo "  Waiting for the download to show up in $DOWNLOADS ..."
   echo "  (or drag the downloaded file into this window and press Enter)"
+  [ -n "${ALLOW_SKIP:-}" ] && echo "  (or type skip and press Enter to do this later)"
   while :; do
     IFS='|' read -r -a pats <<< "$patterns"
     for p in "${pats[@]}"; do
       found="$(find "$DOWNLOADS" -maxdepth 1 -name "$p" -newer "$marker" \
-        ! -name '*.crdownload' ! -name '*.download' ! -name '*.part' 2>/dev/null | head -1)"
+        ! -name '*.crdownload' ! -name '*.download' ! -name '*.part' 2>/dev/null | head -1 || true)"
       [ -n "$found" ] && { WAITED_FILE="$found"; return 0; }
     done
     line=""
     if read -r -t 2 line </dev/tty 2>/dev/null && [ -n "$line" ]; then
       if [ "$line" = "manual" ] && [ -n "${ALLOW_MANUAL:-}" ]; then WAITED_FILE="manual"; return 0; fi
+      if [ "$line" = "skip" ] && [ -n "${ALLOW_SKIP:-}" ]; then WAITED_FILE="skip"; return 0; fi
       # Dragged paths arrive quoted or with backslash-escaped spaces.
       line="${line%"${line##*[![:space:]]}"}"
       line="${line#\'}"; line="${line%\'}"; line="${line#\"}"; line="${line%\"}"
@@ -71,9 +74,27 @@ wait_for_download() {
   done
 }
 
+# macOS asks before Terminal may look in Downloads; ask now, before a browser window covers the prompt.
+check_downloads() {
+  echo "  Checking that Terminal can see $DOWNLOADS (if macOS asks, click OK / Allow)..."
+  until ls "$DOWNLOADS" >/dev/null 2>&1; do
+    bold "Terminal isn't allowed to look in $DOWNLOADS."
+    echo "  Open System Settings > Privacy & Security > Files and Folders > Terminal and turn on \"Downloads Folder\"."
+    echo "  Or skip this, and drag the downloaded file into this window when asked."
+    yes_no "Skip and continue?" && return 0
+  done
+}
+
+if ! { : </dev/tty; } 2>/dev/null; then
+  echo "Please run this from the Terminal app: bash setup-channelscope.sh"
+  exit 1
+fi
+
 if [ "${1:-}" = "--reset" ]; then
+  old="$(cat "$PROJECT_FILE" 2>/dev/null || true)"
   rm -f "$SECRET" "$PROJECT_FILE" "$CONF"/token-*.json
   echo "Forgot the Google project and sign-in. Run bash setup-channelscope.sh again to start over."
+  [ -n "$old" ] && echo "(The old Google Cloud project $old still exists; delete it at https://console.cloud.google.com/cloud-resource-manager if you like.)"
   exit 0
 fi
 mkdir -p "$CONF" "$REPORTS"
@@ -84,13 +105,19 @@ HAVE_SECRET=""
 # ---------------------------------------------------------------- 1. install
 step "1/7  Installing channelscope"
 if [ -z "${CHANNELSCOPE_SKIP_INSTALL:-}" ]; then
-  py_ok() { command -v python3 >/dev/null && python3 -c 'import sys; sys.exit(sys.version_info < (3, 10))' 2>/dev/null; }
+  py_ok() {
+    local p
+    p="$(command -v python3)" || return 1
+    # Apple's /usr/bin/python3 is a stub that pops up a developer-tools installer (and is only 3.9).
+    if [ "$p" = /usr/bin/python3 ] && [ "$(uname)" = Darwin ] && ! xcode-select -p >/dev/null 2>&1; then return 1; fi
+    "$p" -c 'import sys; sys.exit(sys.version_info < (3, 10))' 2>/dev/null
+  }
   if ! py_ok; then
     if command -v brew >/dev/null; then
       echo "Installing Python with Homebrew..."
       brew install python
     else
-      bold "You need Python 3.10 or newer. Download the macOS installer, run it, then come back here."
+      bold "You need Python 3.10 or newer. Click the yellow \"Download Python\" button, run the installer, then come back here."
       open_url "https://www.python.org/downloads/"
       until py_ok; do pause "Press Enter once Python is installed..."; hash -r; done
     fi
@@ -102,23 +129,32 @@ CHANNELSCOPE="${CHANNELSCOPE_BIN:-$DIR/.venv/bin/channelscope}"
 
 # ---------------------------------------------------------------- 2. Claude key
 step "2/7  Claude API key"
-if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+key_line() { grep -E '^[[:space:]]*export[[:space:]]+ANTHROPIC_API_KEY=' "$RC" 2>/dev/null | tail -1 || true; }
+NEW_KEY=""
+[ "${1:-}" = "--new-key" ] && NEW_KEY=1 && unset ANTHROPIC_API_KEY
+line="$(key_line)"
+if [ -z "$NEW_KEY" ] && [ -n "${ANTHROPIC_API_KEY:-}" ]; then
   echo "  found in this Terminal"
-elif grep -q "ANTHROPIC_API_KEY" "$RC" 2>/dev/null; then
-  # shellcheck disable=SC1090
-  eval "$(grep -E '^export ANTHROPIC_API_KEY=' "$RC" | tail -1)"
+elif [ -z "$NEW_KEY" ] && [ -n "$line" ] && eval "$line" && [ -n "${ANTHROPIC_API_KEY:-}" ]; then
   echo "  found in $RC"
 else
   echo "channelscope uses Claude to read your thumbnails, transcripts and comments."
-  echo "Create a key (Create Key > copy it), then paste it here."
-  open_url "https://console.anthropic.com/settings/keys"
+  echo "  1. Sign in, then under Billing add some credit (\$5 is plenty; one report costs a few dollars)."
+  echo "  2. Under API keys, click Create Key, give it any name, and copy it."
+  open_url "https://console.anthropic.com/settings/billing"
   while :; do
     read -r -s -p "Paste your key (it won't show as you paste) and press Enter: " key </dev/tty || true
     echo
     key="$(printf '%s' "$key" | tr -d '[:space:]')"
     case "$key" in sk-ant-*) break ;; *) echo "  That doesn't look like a Claude key (they start with sk-ant-). Try again." ;; esac
   done
+  if [ -f "$RC" ]; then
+    # Drop older saved keys (writes through a symlinked profile instead of replacing it)
+    grep -vE '^[[:space:]]*export[[:space:]]+ANTHROPIC_API_KEY=' "$RC" > "$RC.cs.tmp" || true
+    cat "$RC.cs.tmp" > "$RC"; rm -f "$RC.cs.tmp"
+  fi
   printf "\nexport ANTHROPIC_API_KEY='%s'\n" "$key" >> "$RC"
+  chmod 600 "$RC" 2>/dev/null || true
   export ANTHROPIC_API_KEY="$key"
   echo "  saved to $RC"
 fi
@@ -140,11 +176,6 @@ else
       echo "Installing the Google Cloud CLI with Homebrew (takes a minute)..."
       brew install --cask gcloud-cli
     else
-      if [ "$(uname)" = Darwin ] && ! xcode-select -p >/dev/null 2>&1; then
-        bold "macOS will ask to install its Command Line Tools. Click Install and wait for it to finish."
-        xcode-select --install 2>/dev/null || true
-        until xcode-select -p >/dev/null 2>&1; do sleep 5; done
-      fi
       echo "Installing the Google Cloud CLI into ~/google-cloud-sdk (takes a minute; it may ask for your Mac password)..."
       tmp="$(mktemp)"
       curl -fsSL https://sdk.cloud.google.com -o "$tmp"
@@ -172,16 +203,31 @@ else
     ACCOUNT="$("$GCLOUD" auth list --filter=status:ACTIVE --format='value(account)' | head -1)"
   fi
   echo "  signed in as $ACCOUNT"
+  # Open console pages as this account even if the browser's default Google account is another one.
+  AU="authuser=$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe="@"))' "$ACCOUNT")"
 
   PROJECT="$(cat "$PROJECT_FILE" 2>/dev/null || true)"
   if [ -n "$PROJECT" ] && "$GCLOUD" projects describe "$PROJECT" --format='value(projectId)' >/dev/null 2>&1; then
     echo "  reusing project $PROJECT"
   else
     PROJECT="channelscope-$(od -An -N4 -tx4 /dev/urandom | tr -d ' \n')"
-    until "$GCLOUD" projects create "$PROJECT" --name="channelscope" --quiet >/dev/null 2>&1; do
-      bold "Google wouldn't create the project yet. This usually means you haven't accepted Google Cloud's terms."
-      echo "In the page that opens: pick your country, tick the box to agree, click Agree and continue. You don't need a free trial or billing."
-      open_url "https://console.cloud.google.com/"
+    tries=0
+    until err="$("$GCLOUD" projects create "$PROJECT" --name="channelscope" --quiet 2>&1)"; do
+      "$GCLOUD" projects describe "$PROJECT" >/dev/null 2>&1 && break  # it was created after all
+      tries=$((tries + 1))
+      if printf '%s' "$err" | grep -qiE 'terms|tos|agree'; then
+        bold "Google wants you to accept Google Cloud's terms first."
+        echo "In the page that opens: check the round picture at the top right is $ACCOUNT (click it to switch),"
+        echo "pick your country, tick the box to agree, and click Agree and continue. You don't need a free trial or billing."
+        open_url "https://console.cloud.google.com/?$AU"
+      elif printf '%s' "$err" | grep -qi 'quota'; then
+        bold "Your Google account has too many Cloud projects. Delete ones you don't use (Settings > Shut down) on the page that opens."
+        open_url "https://console.cloud.google.com/cloud-resource-manager?$AU"
+      else
+        bold "Google wouldn't create the project. It said:"
+        printf '  %s\n' "$err"
+      fi
+      [ "$tries" -ge 4 ] && { echo "Still failing; send the message above to whoever is helping you set this up."; exit 1; }
       pause "Press Enter to try again..."
     done
     echo "$PROJECT" > "$PROJECT_FILE"
@@ -213,7 +259,7 @@ else
   5. Tick "I agree to the Google API Services: User Data Policy", click Continue, then Create
   (If it says the app is already set up, there's nothing to do on this page.)
 EOF
-  open_url "https://console.cloud.google.com/auth/overview?project=$PROJECT"
+  open_url "https://console.cloud.google.com/auth/overview?project=$PROJECT&$AU"
   pause
 
   bold "Page 2 of 3: let yourself in"
@@ -223,7 +269,7 @@ EOF
      (so you don't have to sign in again every week. Only you will use it,
      so Google doesn't need to review it.)
 EOF
-  open_url "https://console.cloud.google.com/auth/audience?project=$PROJECT"
+  open_url "https://console.cloud.google.com/auth/audience?project=$PROJECT&$AU"
   pause
 
   bold "Page 3 of 3: make the key"
@@ -233,10 +279,12 @@ EOF
   3. In the box that pops up, click "Download JSON" (do it now: Google only
      lets you download it this once)
 EOF
-  echo "  No Download JSON button? Type manual and press Enter to paste the Client ID and secret instead."
+  echo "  Closed the box without downloading? Click \"+ Create client\" again and download it this time."
+  echo "  No Download JSON button at all? Type manual and press Enter to paste the Client ID and secret instead."
+  check_downloads
   marker="$(mktemp)"
   sleep 1
-  open_url "https://console.cloud.google.com/auth/clients?project=$PROJECT"
+  open_url "https://console.cloud.google.com/auth/clients?project=$PROJECT&$AU"
   ALLOW_MANUAL=1
   while :; do
     wait_for_download "client_secret*.json|*.apps.googleusercontent.com.json" "$marker"
@@ -281,32 +329,38 @@ if [ -f "$STUDIO" ]; then
 fi
 if yes_no "Export it from YouTube Studio now?"; then
   cat <<'EOF'
-  1. In YouTube Studio click Analytics (left), then "Advanced mode" (top right)
+  1. In YouTube Studio click Analytics (left), then "Advanced mode" (top right), on the Content tab
   2. Set the date range (top right) to "Lifetime"
   3. Make sure "Impressions" and "Impressions click-through rate" are columns.
      If not, click the + / metrics button above the table and tick them.
   4. Click the download arrow (top right) > "Comma-separated values (.csv)"
 EOF
+  check_downloads
   marker="$(mktemp)"
   sleep 1
   open_url "https://studio.youtube.com/"
+  ALLOW_SKIP=1
   wait_for_download "*.zip|Table data*.csv|Content *" "$marker"
+  ALLOW_SKIP=""
   rm -f "$marker"
   csv=""
-  if [ -d "$WAITED_FILE" ]; then
-    csv="$(find "$WAITED_FILE" -name 'Table data*.csv' | head -1)"
+  if [ "$WAITED_FILE" = "skip" ]; then
+    echo "  Skipped; rerun this script later to add CTR."
+    WAITED_FILE=""
+  elif [ -d "$WAITED_FILE" ]; then
+    csv="$(find "$WAITED_FILE" -name 'Table data*.csv' 2>/dev/null | head -1 || true)"
   elif [ "${WAITED_FILE##*.}" = "zip" ]; then
     tmpd="$(mktemp -d)"
-    unzip -q -o "$WAITED_FILE" -d "$tmpd"
-    csv="$(find "$tmpd" -name 'Table data*.csv' | head -1)"
-  else
+    unzip -q -o "$WAITED_FILE" -d "$tmpd" 2>/dev/null || true
+    csv="$(find "$tmpd" -name 'Table data*.csv' 2>/dev/null | head -1 || true)"
+  elif [ -n "$WAITED_FILE" ]; then
     csv="$WAITED_FILE"
   fi
-  if [ -n "$csv" ] && grep -qi "click-through" "$csv"; then
+  if [ -n "$csv" ] && "${CHANNELSCOPE_PYTHON:-$DIR/.venv/bin/python}" -c 'import sys, pathlib; from channelscope.reach import read_studio_csv as r; sys.exit(0 if r(pathlib.Path(sys.argv[1])) else 1)' "$csv" 2>/dev/null; then
     cp "$csv" "$STUDIO"
     echo "  saved; channelscope will use it automatically"
-  else
-    echo "  That export doesn't have the Impressions click-through rate column. Skipping CTR for now;"
+  elif [ -n "$WAITED_FILE" ]; then
+    echo "  That export isn't the Content tab with Impressions and Impressions click-through rate. Skipping CTR for now;"
     echo "  you can rerun this script later to try again."
   fi
 fi
@@ -321,13 +375,20 @@ if [ ! -f "$CONF/token-default.json" ]; then
   - "Google hasn't verified this app": click Continue (or Advanced > Go to channelscope).
     It's your own app, so this is expected.
   - Tick every box and click Continue
+  - If Google says "Access blocked", go back to page 2 (Test users / Publish app):
 EOF
+  PROJECT="${PROJECT:-$(cat "$PROJECT_FILE" 2>/dev/null || true)}"
+  echo "    https://console.cloud.google.com/auth/audience${PROJECT:+?project=$PROJECT}"
   pause "Press Enter to open it..."
 fi
 cd "$REPORTS"
 args=()
 [ -n "$NEXT" ] && args+=(--next "$NEXT")
-"$CHANNELSCOPE" ${args[@]+"${args[@]}"}
+until "$CHANNELSCOPE" ${args[@]+"${args[@]}"}; do
+  echo
+  yes_no "That didn't work (see the message above). Sign in again and retry?" || exit 1
+  rm -f "$CONF/token-default.json"
+done
 
 report="$(ls -t "$REPORTS"/channelscope-*.html 2>/dev/null | head -1 || true)"
 bold "Done."

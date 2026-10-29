@@ -31,6 +31,12 @@ Then run channelscope again. A browser window opens once to sign in. If your
 channel is a Brand Account, pick the channel (not your personal account) there."""
 
 
+SIGNIN_HELP = """\
+Google sign-in didn't finish. If Google said "Access blocked" or "has not completed the
+Google verification process": open https://console.cloud.google.com/auth/audience , add
+your Google account under Test users (or click Publish app), then run this again."""
+
+
 class SetupError(RuntimeError):
     pass
 
@@ -56,7 +62,10 @@ def credentials(client_secret: Path, token_path: Path, scopes: list[str]):
         from google_auth_oauthlib.flow import InstalledAppFlow
 
         flow = InstalledAppFlow.from_client_secrets_file(str(client_secret), scopes)
-        creds = flow.run_local_server(port=0, prompt="consent")
+        try:
+            creds = flow.run_local_server(port=0, prompt="consent", timeout_seconds=600)
+        except Exception as e:  # timed out (the library fails on the missing redirect) or the user said no
+            raise SetupError(SIGNIN_HELP) from e
     token_path.parent.mkdir(parents=True, exist_ok=True)
     token_path.write_text(creds.to_json())
     os.chmod(token_path, 0o600)

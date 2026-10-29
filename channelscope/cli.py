@@ -131,7 +131,11 @@ def gather(args) -> dict:
     creds = auth.credentials(args.client_secret, token, scopes)
     yt, ya, yr = auth.services(creds)
 
-    channel = youtube.my_channel(yt)
+    try:
+        channel = youtube.my_channel(yt)
+    except youtube.NoChannel:
+        token.unlink(missing_ok=True)  # so the next run asks to sign in again
+        raise
     print(f"Channel: {channel['title']} ({channel['subscribers']:,} subscribers)", file=sys.stderr)
     cache = args.cache_dir / channel["id"]
     max_age = 0 if args.refresh else 20  # hours
@@ -164,7 +168,12 @@ def gather(args) -> dict:
         if age > 30:
             notes.append(f"CTR comes from a Studio export {age:.0f} days old; rerun setup-channelscope.sh to refresh it.")
     for path in csvs:
-        studio.update(reach.read_studio_csv(path))
+        try:
+            studio.update(reach.read_studio_csv(path))
+        except (ValueError, UnicodeDecodeError) as e:
+            if path != saved:
+                raise
+            notes.append(f"Ignored the saved Studio export ({e}). Rerun setup-channelscope.sh to export it again.")
     api_reach: dict[str, dict] = {}
     if not args.no_reach:
         from googleapiclient.errors import HttpError
@@ -265,7 +274,17 @@ def run(args) -> int:
 
     scores = stats.score_all(videos)
     lifts = strategy.compute_lifts(videos, scores)
-    plan = None if args.no_llm else analyse_with_claude(args, g, scores, lifts)
+    plan = None
+    if not args.no_llm:
+        import anthropic
+
+        try:
+            plan = analyse_with_claude(args, g, scores, lifts)
+        except (anthropic.APIStatusError, LLMError) as e:
+            msg = getattr(e, "message", None) or str(e)
+            hint = " Add credit at https://console.anthropic.com/settings/billing and run again." if "credit" in msg.lower() else ""
+            print(f"\nClaude couldn't finish ({msg}).{hint} Writing the report with the numbers only.", file=sys.stderr)
+            g["notes"].append(f"Claude's analysis didn't run: {msg}.{hint}")
 
     out = args.out or Path(f"channelscope-{_slug(channel['title'])}.md")
     thumbs = report.copy_thumbnails(videos, out.parent / f"{out.stem}-thumbnails")
@@ -300,7 +319,7 @@ def main(argv: list[str] | None = None) -> int:
         return run(args)
     except KeyboardInterrupt:
         return 130
-    except auth.SetupError as e:
+    except (auth.SetupError, youtube.NoChannel) as e:
         print(e, file=sys.stderr)
         return 2
     except Exception as e:

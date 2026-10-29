@@ -1,6 +1,7 @@
 """YouTube Data API: your uploads, their metadata, thumbnails, comments, captions."""
 from __future__ import annotations
 
+import ssl
 import sys
 import urllib.request
 from pathlib import Path
@@ -10,13 +11,17 @@ from guestprep.models import Segment
 from .models import ChannelVideo, parse_iso_duration
 
 
+class NoChannel(RuntimeError):
+    pass
+
+
 def my_channel(yt) -> dict:
     resp = yt.channels().list(part="snippet,contentDetails,statistics", mine=True).execute()
     items = resp.get("items") or []
     if not items:
-        raise RuntimeError(
-            "This Google account has no YouTube channel. If your channel is a Brand Account, "
-            "delete the saved sign-in (channelscope --logout) and pick the channel when signing in."
+        raise NoChannel(
+            "The Google account you signed in with has no YouTube channel. Run channelscope again and, "
+            "in the sign-in window, pick the account or Brand Account channel your videos are on."
         )
     ch = items[0]
     return {
@@ -102,7 +107,11 @@ def download_thumbnail(video: ChannelVideo, directory: Path) -> Path | None:
     if not path.exists():
         directory.mkdir(parents=True, exist_ok=True)
         try:
-            with urllib.request.urlopen(video.thumbnail_url, timeout=30) as r:
+            # certifi's CA bundle: python.org's Python has none until "Install Certificates" is run
+            import certifi
+
+            ctx = ssl.create_default_context(cafile=certifi.where())
+            with urllib.request.urlopen(video.thumbnail_url, timeout=30, context=ctx) as r:
                 path.write_bytes(r.read())
         except OSError as e:
             print(f"  couldn't download thumbnail for {video.id}: {e}", file=sys.stderr)

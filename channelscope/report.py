@@ -24,7 +24,8 @@ def _x(x):
 
 
 def _md(s: str) -> str:
-    return " ".join(str(s).split()).replace("|", "\\|")
+    """Outside text (titles, comments, Claude's prose) as one safe table/markdown line."""
+    return html.escape(" ".join(str(s).split()), quote=False).replace("|", "\\|")
 
 
 def _rules(title: str, rules: list[dict]) -> list[str]:
@@ -81,7 +82,7 @@ def render_markdown(
     numbered = list(enumerate(videos, 1))
     n_ctr = sum(v.ctr is not None for v in videos)
     out = [
-        f"# Audience & packaging report: {channel['title']}",
+        f"# Audience & packaging report: {_md(channel['title'])}",
         "",
         f"_{date.today().isoformat()} · {len(videos)} long-form videos · CTR for {n_ctr} · "
         f"{sum(bool(v.moments) for v in videos)} episodes read for drop-offs and comments_",

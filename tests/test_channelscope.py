@@ -453,3 +453,43 @@ def test_main_needs_key_unless_no_llm(monkeypatch, capsys):
     monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
     assert cli.main([]) == 2
     assert "ANTHROPIC_API_KEY" in capsys.readouterr().err
+
+
+def test_bad_saved_studio_export_is_ignored(fake_google, tmp_path):
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "studio.csv").write_text("Traffic source,Impressions click-through rate (%)\nSearch,5\n")
+    args, out = _args(tmp_path, "--no-llm", "--no-reach")
+    assert cli.run(args) == 0
+    assert "Ignored the saved Studio export" in out.read_text()
+
+
+def test_no_channel_forgets_sign_in(fake_google, tmp_path, monkeypatch):
+    monkeypatch.setattr(FakeYT, "channels", lambda self: SimpleNamespace(list=lambda **kw: Req({"items": []})))
+    token = tmp_path / "config" / "token-default.json"
+    token.parent.mkdir(parents=True)
+    token.write_text("{}")
+    args, _ = _args(tmp_path, "--no-llm")
+    monkeypatch.setattr(cli, "parse_args", lambda argv=None: args)
+    assert cli.main([]) == 2
+    assert not token.exists()
+
+
+def test_claude_failure_still_writes_report(fake_google, tmp_path, monkeypatch):
+    from guestprep.llm import LLMError
+
+    def boom(*a, **kw):
+        raise LLMError("credit balance is too low")
+    monkeypatch.setattr(cli, "make_client", lambda: object())
+    monkeypatch.setattr(cli, "analyse_with_claude", boom)
+    args, out = _args(tmp_path)
+    assert cli.run(args) == 0
+    md = out.read_text()
+    assert "Claude's analysis didn't run" in md and "settings/billing" in md and "## Every video" in md
+
+
+def test_report_escapes_html():
+    from channelscope import report
+
+    assert report._md("Me <vs> You | <img src=x onerror=alert(1)>") == "Me &lt;vs&gt; You \\| &lt;img src=x onerror=alert(1)&gt;"
+    page = report.render_html("# " + report._md("<script>alert(1)</script>"), "<b>x</b>")
+    assert "<script>" not in page and "&lt;b&gt;x&lt;/b&gt;" in page
