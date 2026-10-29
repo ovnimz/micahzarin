@@ -50,9 +50,9 @@ guestprep "Morgan Housel"
 bash install.sh
 ```
 
-This installs guestprep and adds two commands to every new Terminal window:
-`guestprep` (from any folder) and `guestprep-update` (download the latest
-version). Run it again any time; it's safe. You also need a Claude API key:
+This installs guestprep and adds three commands to every new Terminal window:
+`guestprep` (from any folder), `channelscope` (your own channel's analytics,
+[below](#channelscope)) and `guestprep-update` (download the latest version). Run it again any time; it's safe. You also need a Claude API key:
 
 ```
 echo 'export ANTHROPIC_API_KEY=sk-ant-...' >> ~/.zshrc
@@ -134,6 +134,134 @@ transcripts, which can be longer than YouTube ones. Use `--model` to pick a diff
 Requests have server-side refusal fallback turned on (`fallbacks: "default"`).
 If the model's safety classifier declines a transcript, the API retries it on
 a fallback model instead of skipping the episode.
+
+# channelscope
+
+**Your own channel, explained.** Connects to your YouTube analytics and works
+out who your audience is, what makes them click, what keeps them watching, and
+where and why they leave. It turns that into a strategy for titles,
+thumbnails and interviews.
+
+```
+channelscope --next "Jane Doe, ex-FBI negotiator, on getting people to talk"
+```
+
+For your most recent 50 long-form videos (`-n` to change):
+
+1. **Pulls the numbers.** Views, watch time, average % viewed, subscribers
+   gained, likes, shares, traffic sources, the YouTube searches that found
+   each video, the videos it was suggested next to, and the full retention
+   curve. Also channel-wide age/gender, countries, devices and subscriber vs.
+   non-subscriber viewing.
+2. **Gets impressions and CTR** (see below), then scores every video against
+   the five uploads either side of it, so growth or a slow month doesn't
+   skew the comparison.
+3. **Looks at every thumbnail.** It measures brightness, contrast, saturation
+   and colourfulness, and Claude tags faces, expression, eye contact, the
+   exact overlay text, clutter, readability at phone size, and the title's
+   style and promise. Thumbnails are saved in a folder next to the report.
+4. **Finds the drop-offs.** It flags places where noticeably more people left
+   than is normal for that video, and places people rewatched. Claude reads
+   the transcript there (plus the opening minute) and says what was
+   happening: a sponsor read, a long setup, a tangent, a story that landed.
+5. **Reads the comments.** The top 100 per video. It finds what people liked
+   and disliked, what they asked for, questions they wished you'd asked, what
+   they say about the host, and which timestamps they quote.
+6. **Builds the model.** It compares title and thumbnail traits with CTR,
+   views, retention and subscribers, then Claude (Opus) writes the report:
+   - **Your audience**: who they are, what they come for, why they click,
+     stay and leave, the words they use, what else they watch
+   - **Next episode** (with `--next`): titles, thumbnail concepts, an opening
+     for the first 60 seconds
+   - **Titles and thumbnails**: what works and what to avoid on *this*
+     channel, each with evidence and a confidence level; best and worst CTR
+     thumbnails side by side
+   - **Interviewing**: what to do more and less of, openings, topics that
+     hold and lose viewers
+   - **Biggest drop-offs / most rewatched**: timestamped links and what was
+     happening at each
+   - **Content opportunities** and **experiments to run** (e.g. YouTube's Test
+     & Compare)
+   - The data: every video in a table, the audience, and which traits go with
+     better numbers
+
+It writes `channelscope-<channel>.md` with a `-thumbnails/` folder, a `.csv`
+(one row per video, opens in Excel/Numbers), a `.json` with everything, and
+`-data.md`. The last one is the summary Claude worked from: paste it into a
+Claude chat to ask your own follow-up questions.
+
+## One-time Google setup
+
+YouTube analytics need your permission, which goes through a Google Cloud
+project you own (free):
+
+1. Go to [console.cloud.google.com](https://console.cloud.google.com/) and
+   create a project (any name).
+2. **APIs & Services > Library**: enable **YouTube Data API v3**, **YouTube
+   Analytics API** and **YouTube Reporting API**.
+3. **APIs & Services > OAuth consent screen**: choose External, fill in an
+   app name and your email, and add your Google account as a test user.
+4. **APIs & Services > Credentials > Create credentials > OAuth client ID**,
+   type **Desktop app**. Download the JSON and save it as
+   `~/.config/channelscope/client_secret.json`.
+
+The first run opens a browser to sign in. If your channel is a Brand Account,
+pick the channel there. The sign-in is saved. While the consent screen is in
+"Testing", Google expires it after 7 days and the browser opens again; click
+**Publish app** on the consent screen to stop that. Since you're the only user,
+Google doesn't need to review it.
+
+## Impressions and CTR
+
+YouTube's Analytics API doesn't include impressions or click-through rate.
+There are two ways to get them:
+
+- **Studio export (lifetime numbers, works now).** In YouTube Studio:
+  Analytics > Advanced mode > Content. Make sure **Impressions** and
+  **Impressions click-through rate** are columns, set the date range to
+  Lifetime, then Export > Comma-separated values. Pass the `Table data.csv`
+  from the download:
+  `channelscope --studio-csv ~/Downloads/Content*/Table\ data.csv`
+- **Automatic (fills in over time).** The first run starts YouTube's daily
+  reach report through the Reporting API. Reports take up to 48 hours to
+  appear and only cover days after that, so CTR builds up with each run.
+
+When both exist for a video, the Studio export wins.
+
+## Usage
+
+```
+channelscope                                   # last 50 long-form videos
+channelscope -n 100 --since 2025-01-01         # more history
+channelscope --studio-csv "Table data.csv"     # add lifetime CTR
+channelscope --next "guest + topic"            # titles/thumbnails/opening for your next episode
+channelscope --shorts                          # include Shorts (left out by default)
+channelscope --fast                            # cheaper: everything on Sonnet
+channelscope --no-llm                          # numbers, stats and drop-off transcripts only, no Claude
+channelscope --refresh                         # re-download analytics instead of using today's cache
+channelscope --account second-channel          # keep a separate sign-in per channel
+channelscope --logout
+```
+
+Transcripts come from the same caption download guestprep uses, so the
+same "too many requests" / "not a bot" fixes apply (`--cookies-from-browser
+chrome`). For your own videos there's also `--captions-api`: it downloads
+your captions through the official API instead. It asks for one more
+permission and uses 250 of the 10,000 daily quota units per video.
+
+## Cost and limits
+
+- **YouTube quota:** a 50-video run uses about 60-100 of your 10,000 daily
+  units (more with `--captions-api`). Analytics, comments, thumbnails and
+  transcripts are cached in `~/.cache/channelscope`, so a re-run the same day
+  is quick.
+- **Claude:** thumbnails and episodes are read by Sonnet, then Opus writes the
+  model. With 50 one-hour episodes that's about $3-6 on the first run.
+  Re-runs reuse earlier readings (only videos with new comments or retention
+  changes are read again), so they mostly cost the final step, under $1.
+- **Sample size:** with a few dozen videos the trait statistics are leads to
+  test, not rules. The report gives each recommendation a confidence level,
+  and the experiments section suggests how to check them.
 
 ## Tests
 

@@ -27,12 +27,15 @@ def call_json(
     *,
     model: str,
     system: str,
-    user: str,
+    user: str | list,
     schema: dict,
     effort: str = "medium",
     max_tokens: int = 32000,
 ) -> dict | None:
-    """Return the parsed JSON object, or None if the request was refused."""
+    """Return the parsed JSON object, or None if the request was refused.
+
+    `user` is the message text, or a list of content blocks (e.g. an image plus text).
+    """
     with client.beta.messages.stream(
         model=model,
         max_tokens=max_tokens,

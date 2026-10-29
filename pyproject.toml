@@ -12,6 +12,10 @@ dependencies = [
   "anthropic>=1.0",
   "yt-dlp>=2025.1.1",
   "youtube-transcript-api>=1.2",
+  # channelscope
+  "google-api-python-client>=2.100",
+  "google-auth-oauthlib>=1.2",
+  "pillow>=10",
 ]
 
 [project.optional-dependencies]
@@ -19,6 +23,7 @@ dev = ["pytest>=8"]
 
 [project.scripts]
 guestprep = "guestprep.cli:main"
+channelscope = "channelscope.cli:main"
 
 [tool.setuptools]
-packages = ["guestprep"]
+packages = ["guestprep", "channelscope"]
