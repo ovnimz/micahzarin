@@ -264,10 +264,9 @@ EOF
 
   bold "Page 2 of 3: let yourself in"
   cat <<EOF
-  1. Under "Test users", click "+ Add users", type $ACCOUNT, click Save
-  2. Under "Publishing status", click "Publish app", then Confirm
-     (so you don't have to sign in again every week. Only you will use it,
-     so Google doesn't need to review it.)
+  1. Make sure Publishing status says "Testing". Do NOT click "Publish app" (that makes Google ask for a website and a review).
+  2. Under "Test users", click "+ Add users", type $ACCOUNT, click Save
+     (Google will ask you to sign in again about once a week; that's the only downside.)
 EOF
   open_url "https://console.cloud.google.com/auth/audience?project=$PROJECT&$AU"
   pause
@@ -375,7 +374,7 @@ if [ ! -f "$CONF/token-default.json" ]; then
   - "Google hasn't verified this app": click Continue (or Advanced > Go to channelscope).
     It's your own app, so this is expected.
   - Tick every box and click Continue
-  - If Google says "Access blocked", go back to page 2 (Test users / Publish app):
+  - If Google says "Access blocked", go back to page 2 and add yourself under Test users:
 EOF
   PROJECT="${PROJECT:-$(cat "$PROJECT_FILE" 2>/dev/null || true)}"
   echo "    https://console.cloud.google.com/auth/audience${PROJECT:+?project=$PROJECT}"

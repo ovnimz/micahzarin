@@ -212,8 +212,8 @@ starts over.
 2. **APIs & Services > Library**: turn on **YouTube Data API v3**, **YouTube Analytics API** and
    **YouTube Reporting API**.
 3. **Google Auth Platform > Get started**: name the app, choose External, and add your email.
-   Under **Audience**, add yourself as a test user and click **Publish app**. Otherwise Google
-   makes you sign in again every 7 days.
+   Under **Audience**, add yourself as a test user and leave the app in **Testing** (don't click
+   Publish app: that triggers a Google review). Google then asks you to sign in again about once a week.
 4. **Clients > Create client > Desktop app**. Download the JSON and save it as
    `~/.config/channelscope/client_secret.json`. Google shows the secret only once.
 

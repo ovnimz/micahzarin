@@ -34,7 +34,7 @@ channel is a Brand Account, pick the channel (not your personal account) there."
 SIGNIN_HELP = """\
 Google sign-in didn't finish. If Google said "Access blocked" or "has not completed the
 Google verification process": open https://console.cloud.google.com/auth/audience , add
-your Google account under Test users (or click Publish app), then run this again."""
+your Google account under Test users, then run this again."""
 
 
 class SetupError(RuntimeError):
