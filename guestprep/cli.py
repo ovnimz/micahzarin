@@ -258,7 +258,10 @@ def run(args: argparse.Namespace) -> int:
                 )
             if guide_job is not None:
                 print("Finishing the guide...", file=sys.stderr)
-                guide_data = guide_job.result()
+                try:
+                    guide_data = guide_job.result()
+                except Exception as e:  # keep the questions even if the research step fails
+                    print(f"  guide failed ({type(e).__name__}: {e}); writing the sheet without it", file=sys.stderr)
             if guide_data:
                 quotes = [q for i in guide_data.get("ideas", []) for q in i.get("quotes", [])]
                 bad = sum(not q.get("verified") for q in quotes)

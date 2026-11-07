@@ -23,7 +23,16 @@ class TranscriptRateLimited(TranscriptBlocked):
 
 def ytdlp_opts(proxy: str | None, cookies: str | None, **extra) -> dict:
     """Common yt-dlp options. `cookies` is a cookies.txt path or "browser:<name>"."""
-    opts = {"quiet": True, "no_warnings": True, "skip_download": True, **extra}
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        # We only want captions; newer YouTube pages often list no usable video
+        # format, which otherwise aborts the whole extraction.
+        "ignore_no_formats_error": True,
+        "logger": _SilentLogger(),
+        **extra,
+    }
     if proxy:
         opts["proxy"] = proxy
     if cookies and cookies.startswith("browser:"):

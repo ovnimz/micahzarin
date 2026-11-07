@@ -121,6 +121,18 @@ def test_heuristic_pipeline():
     assert "started" in top.canonical_question
 
 
+class _Wrap:
+    def __init__(self, resp): self.resp = resp
+    def __enter__(self): return self
+    def __exit__(self, *a): pass
+    def get_final_message(self): return self.resp
+
+
+def streaming(create):
+    """Turn a fake messages.create into a fake messages.stream (context manager)."""
+    return lambda **kw: _Wrap(create(**kw))
+
+
 # ---------------------------------------------------------------- Claude paths (stubbed)
 
 class FakeStream:
@@ -150,6 +162,8 @@ class FakeClient:
         return SimpleNamespace(content=[block], stop_reason="tool_use")
 
     def _stream(self, **kw):
+        if "tools" in kw:  # web research loop (guide)
+            return _Wrap(self._create(**kw))
         self.calls.append(kw)
         user_ = kw["messages"][0]["content"]
         # transcripts are read by the fast model; grouping/suggestions use the main one
@@ -354,7 +368,7 @@ def test_web_discover_resumes_pause_turn_and_caches(tmp_path):
         assert kw["extra_body"] == {"fallbacks": "default"}
         return replies.pop(0)
 
-    client = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(create=create)))
+    client = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(stream=streaming(create))))
     found = web.discover(client, "claude-opus-5-5", "Jane Ortiz", "author", tmp_path)
     assert len(found) == 3 and len(calls) == 2
     assert calls[1]["messages"][-1]["role"] == "assistant"  # paused turn echoed back, no extra user message
@@ -370,7 +384,7 @@ def test_web_discover_salvages_urls_from_prose(tmp_path):
     from guestprep import web
 
     text = SimpleNamespace(type="text", text="I found https://pod.example/a and (https://pod.example/b).")
-    client = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(create=lambda **kw: _resp([text]))))
+    client = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(stream=streaming(lambda **kw: _resp([text])))))
     found = web.discover(client, "m", "X", "", tmp_path)
     assert [f["url"] for f in found] == ["https://pod.example/a", "https://pod.example/b"]
 
@@ -525,3 +539,23 @@ def test_substack_archive_pages_past_short_pages(monkeypatch, tmp_path):
     monkeypatch.setattr(requests, "get", lambda url, params=None, **kw: SimpleNamespace(status_code=200, json=lambda: pages[params["offset"]]))
     posts = writing_mod._substack_archive("https://x.substack.com", tmp_path, 25)
     assert len(posts) == 30 and len({p["url"] for p in posts}) == 30
+
+
+
+def test_guide_failure_keeps_the_questions(tmp_path, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
+    fake = FakeClient(EXTRACTIONS)
+
+    def boom(**kw):
+        raise ValueError("Streaming is required")
+    fake._create = boom
+    monkeypatch.setattr(cli, "make_client", lambda: fake)
+    out = tmp_path / "p.md"
+    assert cli.main(["Jane Ortiz", "--no-search", "--transcripts", str(FIXTURES), "-o", str(out), "--cache-dir", str(tmp_path / "c")]) == 0
+    md = out.read_text()
+    assert "## Worn out" in md and "## Fresh questions" in md and "## Who they are" not in md
+
+
+def test_ytdlp_opts_tolerate_missing_formats():
+    o = transcripts.ytdlp_opts(None, None)
+    assert o["ignore_no_formats_error"] is True and o["skip_download"] is True

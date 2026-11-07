@@ -82,7 +82,8 @@ def run_until_tool(
     messages: list = [{"role": "user", "content": user}]
     text_seen: list[str] = []
     for _ in range(rounds):
-        resp = client.beta.messages.create(
+        # Streamed: the SDK refuses non-streaming requests that could run past 10 minutes.
+        with client.beta.messages.stream(
             model=model,
             max_tokens=max_tokens,
             system=system,
@@ -91,7 +92,8 @@ def run_until_tool(
             output_config={"effort": effort},
             betas=[FALLBACK_BETA],
             extra_body={"fallbacks": "default"},
-        )
+        ) as stream:
+            resp = stream.get_final_message()
         if resp.stop_reason == "refusal":
             raise Refused()
         for block in resp.content:
