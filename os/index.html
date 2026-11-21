@@ -1,0 +1,1123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MZ/OS</title>
+<meta name="description" content="Micah Zarin's operating system: a desktop in the browser for preparing and running interviews.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --accent: #ff5a36;
+  --bg: #f4f1ea;
+  --win: #fffdf8;
+  --win-2: #f3efe6;
+  --line: #ddd6c8;
+  --text: #1d1b18;
+  --muted: #6f685c;
+  --bar: rgba(255, 253, 248, .82);
+  --shadow: 0 18px 50px rgba(30, 24, 14, .22), 0 2px 6px rgba(30, 24, 14, .12);
+  --term-bg: #15130f;
+  --term-fg: #e9e2d2;
+  --radius: 10px;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  --sans: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12110f; --win: #1d1b18; --win-2: #26231f; --line: #38332c; --text: #efe9dc; --muted: #a39a8a;
+    --bar: rgba(29, 27, 24, .82); --shadow: 0 18px 50px rgba(0,0,0,.55), 0 2px 6px rgba(0,0,0,.4); color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12110f; --win: #1d1b18; --win-2: #26231f; --line: #38332c; --text: #efe9dc; --muted: #a39a8a;
+  --bar: rgba(29, 27, 24, .82); --shadow: 0 18px 50px rgba(0,0,0,.55), 0 2px 6px rgba(0,0,0,.4); color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; }
+body { background: var(--bg); color: var(--text); font: 14px/1.45 var(--sans); -webkit-font-smoothing: antialiased; user-select: none; }
+button { font: inherit; color: inherit; }
+input, textarea, select { font: inherit; color: var(--text); user-select: text; }
+a { color: var(--accent); }
+
+/* ---------- wallpaper ---------- */
+#desktop { position: fixed; inset: 0; overflow: hidden; }
+.wp { position: absolute; inset: 0; transition: background .4s; }
+.wp-studio { background:
+  radial-gradient(1200px 700px at 85% 110%, color-mix(in srgb, var(--accent) 55%, transparent), transparent 60%),
+  radial-gradient(900px 600px at 10% -10%, #3b2f22, transparent 60%), #17140f; }
+.wp-paper { background:
+  radial-gradient(800px 500px at 90% 100%, color-mix(in srgb, var(--accent) 25%, transparent), transparent 70%),
+  repeating-linear-gradient(0deg, transparent 0 27px, rgba(0,0,0,.045) 27px 28px), #efe8da; }
+.wp-signal { background:
+  radial-gradient(1000px 700px at 20% 120%, #2563eb88, transparent 60%),
+  radial-gradient(900px 600px at 100% 0%, color-mix(in srgb, var(--accent) 45%, transparent), transparent 60%), #0d1322; }
+.wp-tape { background:
+  repeating-radial-gradient(circle at 50% 60%, #1c2a20 0 2px, #1f2f24 2px 5px), #1c2a20; }
+.wp-mark { position: absolute; right: 4vw; bottom: 8vh; font: 700 clamp(64px, 14vw, 180px)/.85 var(--sans);
+  letter-spacing: -.06em; color: rgba(255,255,255,.06); pointer-events: none; text-align: right; }
+.wp-paper + .wp-mark { color: rgba(0,0,0,.06); }
+.wp-mark small { display: block; font: 600 clamp(12px, 1.4vw, 16px)/1.2 var(--mono); letter-spacing: .3em; margin-top: 10px; }
+
+/* ---------- top bar ---------- */
+#topbar { position: fixed; top: 0; left: 0; right: 0; height: 34px; display: flex; align-items: center; gap: 4px;
+  padding: 0 10px; background: var(--bar); backdrop-filter: blur(14px) saturate(1.4); -webkit-backdrop-filter: blur(14px) saturate(1.4);
+  border-bottom: 1px solid var(--line); z-index: 9000; }
+#topbar .logo { font: 700 13px var(--mono); letter-spacing: .04em; padding: 4px 10px; border-radius: 6px; border: 0; background: transparent; cursor: pointer; }
+#topbar .logo b { color: var(--accent); }
+#topbar .logo:hover, #topbar .logo[aria-expanded="true"] { background: var(--win-2); }
+#topbar .app-name { font-weight: 600; padding: 0 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#topbar .spacer { flex: 1; }
+#onair { display: flex; align-items: center; gap: 6px; font: 600 11px var(--mono); letter-spacing: .14em; padding: 3px 9px;
+  border-radius: 5px; border: 1px solid var(--line); color: var(--muted); cursor: pointer; background: transparent; }
+#onair i { width: 8px; height: 8px; border-radius: 50%; background: var(--line); }
+#onair.live { color: #fff; background: #d91e18; border-color: #d91e18; }
+#onair.live i { background: #fff; animation: pulse 1.2s infinite; }
+@keyframes pulse { 50% { opacity: .25; } }
+#clock { font: 500 12.5px var(--mono); padding: 0 6px; white-space: nowrap; }
+
+/* launcher menu */
+#launcher { position: fixed; top: 40px; left: 8px; width: 280px; background: var(--win); border: 1px solid var(--line);
+  border-radius: 12px; box-shadow: var(--shadow); padding: 8px; z-index: 9100; display: none; }
+#launcher.open { display: block; }
+#launcher .who { padding: 10px 10px 12px; border-bottom: 1px solid var(--line); margin-bottom: 6px; }
+#launcher .who b { display: block; font-size: 15px; }
+#launcher .who span { color: var(--muted); font-size: 12.5px; }
+#launcher button.item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 10px; border: 0; background: transparent;
+  border-radius: 7px; cursor: pointer; text-align: left; }
+#launcher button.item:hover, #launcher button.item:focus-visible { background: var(--win-2); outline: none; }
+#launcher hr { border: 0; border-top: 1px solid var(--line); margin: 6px 4px; }
+#launcher .kbd { margin-left: auto; color: var(--muted); font: 11px var(--mono); }
+
+/* ---------- desktop icons ---------- */
+#icons { position: absolute; top: 48px; left: 12px; bottom: 64px; display: grid; grid-auto-flow: column;
+  grid-template-rows: repeat(auto-fill, 92px); gap: 4px; align-content: start; }
+.dicon { width: 88px; height: 88px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  border: 1px solid transparent; border-radius: 10px; background: transparent; cursor: pointer; padding: 4px; color: #fff; }
+.wp-paper ~ #icons .dicon, body.light-wall .dicon { color: var(--text); }
+.dicon .ic { width: 46px; height: 46px; border-radius: 12px; display: grid; place-items: center; box-shadow: 0 4px 14px rgba(0,0,0,.3); }
+.dicon .ic svg { width: 26px; height: 26px; }
+.dicon span { font-size: 12px; font-weight: 500; text-shadow: 0 1px 3px rgba(0,0,0,.6); text-align: center; line-height: 1.15; }
+body.light-wall .dicon span { text-shadow: none; }
+.dicon:hover { background: rgba(255,255,255,.08); }
+.dicon:focus-visible, .dicon.sel { background: rgba(255,255,255,.14); border-color: rgba(255,255,255,.3); outline: none; }
+
+/* ---------- taskbar ---------- */
+#taskbar { position: fixed; left: 50%; bottom: 10px; transform: translateX(-50%); display: flex; gap: 4px; padding: 6px;
+  background: var(--bar); backdrop-filter: blur(14px) saturate(1.4); -webkit-backdrop-filter: blur(14px) saturate(1.4);
+  border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); z-index: 9000; max-width: calc(100vw - 32px); overflow-x: auto; }
+#taskbar button { display: flex; align-items: center; gap: 7px; border: 0; background: transparent; padding: 6px 10px; border-radius: 9px;
+  cursor: pointer; white-space: nowrap; font-size: 12.5px; font-weight: 500; position: relative; }
+#taskbar button:hover { background: var(--win-2); }
+#taskbar button.active { background: var(--win-2); }
+#taskbar button.min { opacity: .55; }
+#taskbar button .ic { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; }
+#taskbar button .ic svg { width: 14px; height: 14px; }
+#taskbar:empty { display: none; }
+
+/* ---------- windows ---------- */
+.win { position: absolute; background: var(--win); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow); display: flex; flex-direction: column; min-width: 300px; min-height: 180px; overflow: hidden;
+  animation: winIn .16s ease-out; }
+@keyframes winIn { from { transform: scale(.97); opacity: 0; } }
+.win.blur { box-shadow: 0 8px 24px rgba(0,0,0,.16); }
+.win.blur .titlebar { color: var(--muted); }
+.win.max { border-radius: 0; }
+.titlebar { height: 38px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 6px 0 12px; background: var(--win-2);
+  border-bottom: 1px solid var(--line); cursor: grab; touch-action: none; }
+.titlebar:active { cursor: grabbing; }
+.titlebar .ic { width: 18px; height: 18px; border-radius: 5px; display: grid; place-items: center; flex: none; }
+.titlebar .ic svg { width: 11px; height: 11px; }
+.titlebar .t { font-weight: 600; font-size: 13px; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.titlebar .btns { display: flex; gap: 2px; }
+.titlebar .btns button { width: 30px; height: 26px; border: 0; background: transparent; border-radius: 6px; cursor: pointer; display: grid; place-items: center; color: var(--muted); }
+.titlebar .btns button:hover { background: var(--line); color: var(--text); }
+.titlebar .btns button.x:hover { background: #d91e18; color: #fff; }
+.titlebar .btns svg { width: 12px; height: 12px; }
+.win .body { flex: 1; overflow: auto; position: relative; user-select: text; }
+.win .grip { position: absolute; right: 0; bottom: 0; width: 18px; height: 18px; cursor: nwse-resize; touch-action: none;
+  background: linear-gradient(135deg, transparent 50%, var(--line) 50% 58%, transparent 58% 70%, var(--line) 70% 78%, transparent 78%); }
+.win.max .grip { display: none; }
+
+/* shared bits */
+.pad { padding: 16px; }
+.muted { color: var(--muted); }
+.btn { border: 1px solid var(--line); background: var(--win); padding: 6px 12px; border-radius: 7px; cursor: pointer; font-weight: 500; font-size: 13px; }
+.btn:hover { background: var(--win-2); }
+.btn.pri { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.pri:hover { filter: brightness(1.07); }
+.btn.sm { padding: 3px 8px; font-size: 12px; }
+.btn:disabled { opacity: .5; cursor: default; }
+.field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+.field label { font-size: 12px; font-weight: 600; color: var(--muted); }
+.field input[type=text], .field input[type=number], .field textarea, .field select, .inp { width: 100%; border: 1px solid var(--line);
+  background: var(--win); border-radius: 7px; padding: 7px 10px; outline: none; }
+.field input:focus, .field textarea:focus, .inp:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent); }
+.check { display: flex; align-items: flex-start; gap: 8px; margin: 6px 0; cursor: pointer; }
+.check input { accent-color: var(--accent); margin-top: 3px; }
+.check small { display: block; color: var(--muted); }
+.toolbar { display: flex; gap: 6px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--line); background: var(--win); position: sticky; top: 0; z-index: 2; flex-wrap: wrap; }
+.tabs { display: flex; gap: 2px; padding: 0 10px; border-bottom: 1px solid var(--line); background: var(--win); position: sticky; top: 0; z-index: 2; overflow-x: auto; }
+.tabs button { border: 0; background: transparent; padding: 9px 10px; cursor: pointer; font-size: 12.5px; font-weight: 600; color: var(--muted); border-bottom: 2px solid transparent; white-space: nowrap; }
+.tabs button.on { color: var(--text); border-color: var(--accent); }
+.tabs button .n { font: 500 11px var(--mono); margin-left: 4px; color: var(--muted); }
+.empty { padding: 40px 20px; text-align: center; color: var(--muted); }
+.card { border: 1px solid var(--line); border-radius: 9px; padding: 12px 14px; margin-bottom: 10px; background: var(--win); }
+.card h4 { margin: 0 0 4px; font-size: 14px; }
+.pill { display: inline-block; font: 600 11px var(--mono); padding: 2px 7px; border-radius: 99px; background: var(--win-2); color: var(--muted); border: 1px solid var(--line); }
+.pill.hot { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.toast { position: fixed; bottom: 76px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 8px 14px;
+  border-radius: 8px; font-size: 13px; z-index: 9999; box-shadow: var(--shadow); animation: winIn .15s; }
+
+/* app icons colours */
+.c-term { background: #1d1b18; color: #7ee787; }
+.c-files { background: #3b82f6; color: #fff; }
+.c-notes { background: #f5c518; color: #1d1b18; }
+.c-prep { background: var(--accent); color: #fff; }
+.c-sheet { background: #8b5cf6; color: #fff; }
+.c-show { background: #d91e18; color: #fff; }
+.c-set { background: #6b7280; color: #fff; }
+.c-about { background: #0f766e; color: #fff; }
+
+/* terminal */
+.term { background: var(--term-bg); color: var(--term-fg); font: 13px/1.5 var(--mono); padding: 10px 12px; min-height: 100%; cursor: text; }
+.term .out { white-space: pre-wrap; word-break: break-word; }
+.term .line { display: flex; gap: 8px; }
+.term .ps { color: #7ee787; white-space: nowrap; }
+.term .ps b { color: #79c0ff; font-weight: 400; }
+.term input { flex: 1; background: transparent; border: 0; outline: none; color: var(--term-fg); font: inherit; padding: 0; caret-color: var(--accent); }
+.term .err { color: #ff7b72; }
+.term .dim { color: #8b8476; }
+.term .hi { color: var(--accent); }
+.term .dir { color: #79c0ff; }
+.term .ok { color: #7ee787; }
+
+/* files */
+.files { display: grid; grid-template-columns: 170px 1fr; height: 100%; }
+.files aside { border-right: 1px solid var(--line); background: var(--win-2); padding: 10px 6px; overflow: auto; }
+.files aside button { display: block; width: 100%; text-align: left; border: 0; background: transparent; padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+.files aside button:hover { background: var(--line); }
+.files aside button.on { background: var(--win); font-weight: 600; }
+.files main { overflow: auto; display: flex; flex-direction: column; }
+.files .crumbs { font: 12px var(--mono); color: var(--muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.files .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 6px; padding: 12px; align-content: start; flex: 1; }
+.files .grid.drop { outline: 2px dashed var(--accent); outline-offset: -8px; }
+.fitem { display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 10px 4px; border-radius: 8px; border: 1px solid transparent; background: transparent; cursor: pointer; }
+.fitem:hover { background: var(--win-2); }
+.fitem.sel { background: color-mix(in srgb, var(--accent) 14%, transparent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.fitem svg { width: 40px; height: 40px; }
+.fitem span { font-size: 12px; text-align: center; word-break: break-all; line-height: 1.2; }
+@media (max-width: 560px) { .files { grid-template-columns: 1fr; } .files aside { display: none; } }
+
+/* notes */
+.notes { display: flex; flex-direction: column; height: 100%; }
+.notes textarea { flex: 1; border: 0; outline: none; resize: none; padding: 18px 22px; background: var(--win); font: 14.5px/1.65 var(--sans); }
+.notes.mono textarea { font: 13.5px/1.6 var(--mono); }
+.notes .status { font: 11.5px var(--mono); color: var(--muted); padding: 5px 12px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; }
+
+/* guest prep builder */
+.cmd { background: var(--term-bg); color: var(--term-fg); font: 12.5px/1.55 var(--mono); border-radius: 9px; padding: 12px 14px; white-space: pre-wrap; word-break: break-word; user-select: all; }
+.cmd .hi { color: var(--accent); }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+@media (max-width: 560px) { .two { grid-template-columns: 1fr; } }
+.cmdbar { position: sticky; bottom: -16px; margin: 0 -16px -16px; padding: 12px 16px 16px; background: var(--win); border-top: 1px solid var(--line); }
+details.more summary { cursor: pointer; font-weight: 600; font-size: 13px; margin: 8px 0; }
+
+/* prep sheet */
+.sheet .q { font-weight: 600; font-size: 14px; margin: 0 0 4px; }
+.sheet .why { color: var(--muted); font-size: 13px; margin: 0; }
+.sheet .row { display: flex; gap: 10px; align-items: flex-start; }
+.sheet .row > div { flex: 1; min-width: 0; }
+.sheet ul.asked { margin: 8px 0 0; padding-left: 18px; font-size: 12.5px; color: var(--muted); }
+.sheet .guide h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 18px 0 6px; }
+.sheet .guide p { margin: 0 0 8px; }
+.sheet blockquote { margin: 6px 0; padding-left: 10px; border-left: 3px solid var(--accent); font-style: italic; }
+
+/* run of show */
+.ros { display: flex; flex-direction: column; height: 100%; }
+.ros .clock { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-bottom: 1px solid var(--line); background: var(--win-2); flex-wrap: wrap; }
+.ros .time { font: 600 34px/1 var(--mono); letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.ros .time.live { color: #d91e18; }
+.ros ol { list-style: none; margin: 0; padding: 8px 10px 10px; flex: 1; overflow: auto; counter-reset: q; }
+.ros li { display: flex; gap: 10px; align-items: flex-start; padding: 9px 8px; border-radius: 8px; border: 1px solid transparent; counter-increment: q; }
+.ros li:hover { background: var(--win-2); }
+.ros li.next { border-color: color-mix(in srgb, var(--accent) 50%, transparent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.ros li::before { content: counter(q); font: 600 11px/22px var(--mono); color: var(--muted); min-width: 18px; text-align: right; }
+.ros li .txt { flex: 1; min-width: 0; }
+.ros li.done .txt p { text-decoration: line-through; color: var(--muted); }
+.ros li .txt p { margin: 0; }
+.ros li .txt small { color: var(--muted); font-size: 11.5px; }
+.ros li .acts { display: flex; gap: 2px; opacity: .35; }
+.ros li:hover .acts, .ros li:focus-within .acts { opacity: 1; }
+.ros li .acts button { border: 0; background: transparent; width: 24px; height: 24px; border-radius: 5px; cursor: pointer; color: var(--muted); }
+.ros li .acts button:hover { background: var(--line); color: var(--text); }
+.ros .add { display: flex; gap: 6px; padding: 10px; border-top: 1px solid var(--line); }
+.ros input[type=checkbox] { accent-color: var(--accent); width: 16px; height: 16px; margin-top: 3px; }
+
+/* settings */
+.swatches { display: flex; gap: 8px; flex-wrap: wrap; }
+.swatch { width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--win); box-shadow: 0 0 0 1px var(--line); cursor: pointer; }
+.swatch.on { box-shadow: 0 0 0 2px var(--text); }
+.walls { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; }
+.walls button { height: 66px; border-radius: 8px; border: 2px solid transparent; cursor: pointer; position: relative; overflow: hidden; padding: 0; }
+.walls button.on { border-color: var(--accent); }
+.walls button span { position: absolute; left: 6px; bottom: 4px; font-size: 11px; font-weight: 600; color: #fff; text-shadow: 0 1px 2px #000; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; background: var(--win); padding: 6px 14px; cursor: pointer; font-size: 13px; }
+.seg button.on { background: var(--accent); color: #fff; }
+h3.sec { font-size: 12px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); margin: 20px 0 10px; }
+h3.sec:first-child { margin-top: 0; }
+
+/* boot */
+#boot { position: fixed; inset: 0; background: #0b0a08; color: #e9e2d2; z-index: 99999; font: 13px/1.6 var(--mono); padding: 8vh 8vw; cursor: pointer; transition: opacity .4s; }
+#boot.gone { opacity: 0; pointer-events: none; }
+#boot .big { font: 700 clamp(40px, 9vw, 96px)/1 var(--sans); letter-spacing: -.05em; margin-bottom: 28px; }
+#boot .big b { color: var(--accent); }
+#boot .ok { color: #7ee787; }
+#boot .skip { position: absolute; bottom: 24px; right: 28px; color: #6f685c; font-size: 12px; }
+
+/* phones: every window fills the screen between the bars */
+@media (max-width: 700px) {
+  .win { left: 0 !important; top: 34px !important; width: 100vw !important; height: calc(100% - 34px - 66px) !important; border-radius: 0; border-left: 0; border-right: 0; }
+  .win .grip { display: none; }
+  .titlebar { cursor: default; }
+  .titlebar .btns .mx { display: none; }
+  #clock .date { display: none; }
+  #taskbar { bottom: 8px; }
+  #taskbar button .lbl { display: none; }
+  #icons { left: 8px; right: 8px; grid-auto-flow: row; grid-template-columns: repeat(auto-fill, 84px); grid-template-rows: none; justify-content: center; }
+}
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<div id="boot" role="presentation">
+  <div class="big">MZ<b>/</b>OS</div>
+  <div id="bootlog"></div>
+  <div class="skip">click to skip</div>
+</div>
+
+<div id="desktop">
+  <div class="wp wp-studio" id="wall"></div>
+  <div class="wp-mark">MZ/OS<small>MICAH ZARIN</small></div>
+  <div id="icons" role="list"></div>
+</div>
+
+<header id="topbar">
+  <button class="logo" id="logoBtn" aria-haspopup="menu" aria-expanded="false">MZ<b>/</b>OS</button>
+  <span class="app-name" id="appName">Desktop</span>
+  <span class="spacer"></span>
+  <button id="onair" title="Open Run of Show"><i></i>ON AIR</button>
+  <span id="clock"></span>
+</header>
+<nav id="launcher" role="menu"></nav>
+<nav id="taskbar" aria-label="Open windows"></nav>
+
+<script>
+"use strict";
+/* =====================================================================
+   MZ/OS — a small operating system in one page.
+   Window manager · virtual file system · apps · settings, all saved
+   in this browser.
+   ===================================================================== */
+
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const h = (html) => { const t = document.createElement("template"); t.innerHTML = html.trim(); return t.content.firstElementChild; };
+const store = {
+  get(k, d) { try { const v = localStorage.getItem("mzos." + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem("mzos." + k, JSON.stringify(v)); } catch {} },
+  clear() { try { Object.keys(localStorage).filter(k => k.startsWith("mzos.")).forEach(k => localStorage.removeItem(k)); } catch {} },
+};
+function toast(msg) {
+  $$(".toast").forEach(x => x.remove());
+  const t = h(`<div class="toast" role="status">${esc(msg)}</div>`);
+  document.body.append(t); setTimeout(() => t.remove(), 2200);
+}
+async function copyText(s) {
+  try { await navigator.clipboard.writeText(s); toast("Copied"); }
+  catch { toast("Couldn't reach the clipboard. Select the text and copy it."); }
+}
+const fmtClock = sec => { sec = Math.max(0, Math.floor(sec)); const hh = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60;
+  return (hh ? hh + ":" + String(m).padStart(2, "0") : String(m).padStart(2, "0")) + ":" + String(s).padStart(2, "0"); };
+
+/* ---------------- icons ---------------- */
+const I = {
+  term: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 7 5 5-5 5"/><path d="M12 18h7"/></svg>',
+  files: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>',
+  notes: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 4h10a2 2 0 0 1 2 2v14l-4-3H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/><path d="M9 9h6M9 13h4"/></svg>',
+  prep: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>',
+  sheet: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>',
+  show: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M9 2h6"/></svg>',
+  set: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>',
+  about: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></svg>',
+  min: '<svg viewBox="0 0 12 12" stroke="currentColor" stroke-width="1.6"><path d="M2 6h8"/></svg>',
+  max: '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="2" width="8" height="8" rx="1"/></svg>',
+  x: '<svg viewBox="0 0 12 12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="m2.5 2.5 7 7M9.5 2.5l-7 7"/></svg>',
+  folder: '<svg viewBox="0 0 40 40"><path d="M4 11a3 3 0 0 1 3-3h8l3 3h15a3 3 0 0 1 3 3v15a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3z" fill="#3b82f6"/><path d="M4 15h32v14a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3z" fill="#60a5fa"/></svg>',
+  doc: '<svg viewBox="0 0 40 40"><path d="M10 4h14l8 8v22a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" fill="var(--win-2)" stroke="var(--line)" stroke-width="1.5"/><path d="M24 4v8h8" fill="none" stroke="var(--line)" stroke-width="1.5"/><path d="M13 19h14M13 23h14M13 27h9" stroke="var(--muted)" stroke-width="1.5"/></svg>',
+  json: '<svg viewBox="0 0 40 40"><path d="M10 4h14l8 8v22a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" fill="#8b5cf6"/><path d="M24 4v8h8z" fill="#c4b5fd"/><text x="20" y="28" font-family="IBM Plex Mono, monospace" font-size="8" font-weight="600" fill="#fff" text-anchor="middle">PREP</text></svg>',
+};
+
+/* =====================================================================
+   Virtual file system
+   ===================================================================== */
+const HOME = "/home/micah";
+const SAMPLE_PREP = {
+  guest: "Jane Doe (sample)",
+  guide: {
+    summary: "A made-up guest so you can see how a prep sheet looks here. Run guestprep on your own computer and drop the .json it writes into Files to replace this.",
+    background: "Jane Doe is a placeholder. Every question, quote and link below is invented for the demo.",
+  },
+  suggestions: {
+    fresh_questions: [
+      { question: "You've said the second draft is where you find out what you think. What did the second draft of your career teach you?", why: "Nobody has asked about her own path in her own terms.", builds_on: "Her essay on revising" },
+      { question: "Which idea of yours do you now think was wrong, and who convinced you?", why: "Every interview treats her ideas as settled.", builds_on: "" },
+      { question: "What do people get wrong when they quote you?", why: "She hinted at this twice and no host followed up.", builds_on: "Unexplored thread, episode 2" },
+    ],
+    no_context_prompts: [
+      { prompt: "You get one sentence on a billboard every commuter in the country sees. What does it say?", technique: "forced constraint", why: "Plays to her talent for compression." },
+      { prompt: "What's something you believed at 20 that you'd now argue against?", technique: "what would change your mind", why: "Gives the audience a way in without her book." },
+    ],
+  },
+  audio_only: [],
+  episodes: [
+    { video: { id: "demo1", title: "Jane Doe on attention (sample episode)", channel: "Sample Show", url: "", page_url: "", local_path: "" }, questions: [], unexplored_threads: ["She mentioned quitting a job in her twenties and moved on fast."], quotes: [] },
+    { video: { id: "demo2", title: "The Long Talk with Jane Doe (sample episode)", channel: "Another Sample Podcast", url: "", page_url: "", local_path: "" }, questions: [], unexplored_threads: ["Said she 'stopped reading the news for a year'. Nobody asked what happened."], quotes: [] },
+    { video: { id: "demo3", title: "Jane Doe: Q&A (sample episode)", channel: "Sample Live", url: "", page_url: "", local_path: "" }, questions: [], unexplored_threads: [], quotes: [] },
+  ],
+  clusters: [
+    { label: "Origin story", canonical_question: "How did you get started?", times_asked: 3, on_topic: true,
+      members: [{ episode_id: "demo1", question: "So how did this all begin for you?", gist: "", seconds: 95 }, { episode_id: "demo2", question: "Take us back to the start.", gist: "", seconds: 240 }, { episode_id: "demo3", question: "How did you get into this?", gist: "", seconds: 30 }] },
+    { label: "Daily routine", canonical_question: "What does a typical day look like for you?", times_asked: 3, on_topic: true,
+      members: [{ episode_id: "demo1", question: "Walk me through your day.", gist: "", seconds: 1310 }, { episode_id: "demo2", question: "What's your morning routine?", gist: "", seconds: 1800 }, { episode_id: "demo3", question: "What's a normal day?", gist: "", seconds: 700 }] },
+    { label: "Advice", canonical_question: "What advice would you give your younger self?", times_asked: 2, on_topic: true,
+      members: [{ episode_id: "demo1", question: "Advice for 20-year-old you?", gist: "", seconds: 3100 }, { episode_id: "demo3", question: "What would you tell your younger self?", gist: "", seconds: 2400 }] },
+    { label: "Book recs", canonical_question: "What are you reading right now?", times_asked: 1, on_topic: true,
+      members: [{ episode_id: "demo2", question: "What's on your nightstand?", gist: "", seconds: 3300 }] },
+  ],
+};
+function defaultFS() {
+  const f = (content) => ({ type: "file", content, mtime: Date.now() });
+  const d = (children = {}) => ({ type: "dir", children, mtime: Date.now() });
+  return d({
+    home: d({ micah: d({
+      "README.txt": f(
+`Welcome to MZ/OS.
+
+This is Micah Zarin's operating system: a desktop that runs in the browser,
+built around preparing for and running interviews.
+
+  Guest Prep     build the guestprep command for your next guest
+  Prep Sheets    open the .json that guestprep writes and pick questions
+  Run of Show    the questions for today's interview, with a show clock
+  Notes          plain text, saved as files here
+  Terminal       a shell over this file system. Type "help".
+  Files          everything you've saved. Drop files in from your computer.
+
+Everything is saved in this browser only. Nothing is sent anywhere.
+`),
+      notes: d({ "ideas.txt": f("Show ideas\n\n- \n") }),
+      prep: d({ "jane-doe-sample.json": f(JSON.stringify(SAMPLE_PREP, null, 2)) }),
+      shows: d({}),
+    }) }),
+    etc: d({ motd: f("MZ/OS. Ask the question nobody has asked yet.\n"), hostname: f("mz\n") }),
+  });
+}
+let FS = store.get("fs", null) || defaultFS();
+const saveFS = () => store.set("fs", FS);
+const fsListeners = new Set();
+const fsChanged = () => { saveFS(); fsListeners.forEach(fn => fn()); };
+
+function norm(path, cwd = HOME) {
+  if (!path) return cwd;
+  if (path === "~" || path.startsWith("~/")) path = HOME + path.slice(1);
+  const parts = (path.startsWith("/") ? path : cwd + "/" + path).split("/");
+  const out = [];
+  for (const p of parts) { if (!p || p === ".") continue; if (p === "..") out.pop(); else out.push(p); }
+  return "/" + out.join("/");
+}
+function node(path) {
+  let n = FS;
+  for (const p of path.split("/").filter(Boolean)) { if (n.type !== "dir" || !n.children[p]) return null; n = n.children[p]; }
+  return n;
+}
+const parentOf = p => p.slice(0, p.lastIndexOf("/")) || "/";
+const baseName = p => p.slice(p.lastIndexOf("/") + 1);
+function writeFile(path, content) {
+  const dir = node(parentOf(path));
+  if (!dir || dir.type !== "dir") throw new Error("no such directory: " + parentOf(path));
+  const name = baseName(path); if (!name) throw new Error("bad file name");
+  const ex = dir.children[name];
+  if (ex && ex.type === "dir") throw new Error(name + " is a directory");
+  dir.children[name] = { type: "file", content, mtime: Date.now() };
+  fsChanged();
+}
+function mkdir(path) {
+  const dir = node(parentOf(path));
+  if (!dir || dir.type !== "dir") throw new Error("no such directory: " + parentOf(path));
+  if (dir.children[baseName(path)]) throw new Error("already exists: " + baseName(path));
+  dir.children[baseName(path)] = { type: "dir", children: {}, mtime: Date.now() };
+  fsChanged();
+}
+function remove(path) {
+  if (path === "/" || path === HOME) throw new Error("refusing to remove " + path);
+  const dir = node(parentOf(path));
+  if (!dir || !dir.children[baseName(path)]) throw new Error("no such file: " + path);
+  delete dir.children[baseName(path)]; fsChanged();
+}
+function uniquePath(dirPath, name) {
+  const dir = node(dirPath); let p = dirPath + "/" + name;
+  if (!dir.children[name]) return p;
+  const dot = name.lastIndexOf("."), stem = dot > 0 ? name.slice(0, dot) : name, ext = dot > 0 ? name.slice(dot) : "";
+  for (let i = 2; ; i++) if (!dir.children[`${stem} ${i}${ext}`]) return `${dirPath}/${stem} ${i}${ext}`;
+}
+const isPrep = (path, n) => path.endsWith(".json") && n && n.type === "file" && /"clusters"\s*:/.test(n.content);
+function openPath(path) {
+  const n = node(path);
+  if (!n) return toast("Not found: " + path);
+  if (n.type === "dir") return openApp("files", { path });
+  if (isPrep(path, n)) return openApp("sheet", { path });
+  return openApp("notes", { path });
+}
+
+/* =====================================================================
+   Settings
+   ===================================================================== */
+const settings = Object.assign({ theme: "auto", wall: "studio", accent: "#ff5a36", boot: true }, store.get("settings", {}));
+const ACCENTS = ["#ff5a36", "#e11d48", "#f59e0b", "#16a34a", "#0ea5e9", "#6366f1", "#a855f7"];
+const WALLS = { studio: "Studio", paper: "Paper", signal: "Signal", tape: "Tape" };
+function applySettings() {
+  const root = document.documentElement;
+  root.style.setProperty("--accent", settings.accent);
+  if (settings.theme === "auto") root.removeAttribute("data-theme"); else root.setAttribute("data-theme", settings.theme);
+  $("#wall").className = "wp wp-" + settings.wall;
+  document.body.classList.toggle("light-wall", settings.wall === "paper");
+  store.set("settings", settings);
+}
+
+/* =====================================================================
+   Window manager
+   ===================================================================== */
+const APPS = {};
+const wins = new Map();         // id -> { el, app, title, min, max, prev }
+let zTop = 10, winSeq = 0, focusedId = null;
+const desk = $("#desktop");
+
+function openApp(appId, args = {}) {
+  const app = APPS[appId];
+  if (!app) return;
+  if (app.single) {
+    const ex = [...wins.values()].find(w => w.app === appId);
+    if (ex) { if (ex.min) toggleMin(ex.id); focusWin(ex.id); ex.api?.onArgs?.(args); return ex; }
+  }
+  const id = "w" + (++winSeq);
+  const W = Math.min(app.w || 640, innerWidth - 40), H = Math.min(app.h || 440, innerHeight - 120);
+  const n = wins.size, x = Math.max(12, Math.min(innerWidth - W - 12, (innerWidth - W) / 2 + (n % 6) * 28 - 70));
+  const y = Math.max(44, Math.min(innerHeight - H - 70, (innerHeight - H) / 2 + (n % 6) * 28 - 60));
+  const el = h(`<section class="win" role="dialog" aria-label="${esc(app.name)}" style="left:${x}px;top:${y}px;width:${W}px;height:${H}px">
+    <div class="titlebar"><span class="ic ${app.color}">${I[app.icon]}</span><span class="t">${esc(app.name)}</span>
+      <span class="btns"><button class="mn" aria-label="Minimize">${I.min}</button><button class="mx" aria-label="Maximize">${I.max}</button><button class="x" aria-label="Close">${I.x}</button></span></div>
+    <div class="body"></div><div class="grip" aria-hidden="true"></div></section>`);
+  desk.append(el);
+  const w = { id, el, app: appId, title: app.name, min: false, max: false, prev: null };
+  wins.set(id, w);
+  const bar = $(".titlebar", el);
+  $(".mn", el).onclick = e => { e.stopPropagation(); toggleMin(id); };
+  $(".mx", el).onclick = e => { e.stopPropagation(); toggleMax(id); };
+  $(".x", el).onclick = e => { e.stopPropagation(); closeWin(id); };
+  bar.ondblclick = e => { if (!e.target.closest("button")) toggleMax(id); };
+  el.addEventListener("pointerdown", () => focusWin(id), true);
+  dragify(w, bar); resizify(w, $(".grip", el));
+  w.setTitle = t => { w.title = t; $(".t", el).textContent = t; renderTaskbar(); if (focusedId === id) $("#appName").textContent = t; };
+  w.api = app.mount($(".body", el), w, args) || {};
+  focusWin(id);
+  return w;
+}
+function focusWin(id) {
+  const w = wins.get(id); if (!w) return;
+  focusedId = id; w.el.style.zIndex = ++zTop;
+  wins.forEach(o => o.el.classList.toggle("blur", o.id !== id));
+  $("#appName").textContent = w.title;
+  renderTaskbar(); w.api.onFocus?.();
+}
+function closeWin(id) {
+  const w = wins.get(id); if (!w) return;
+  w.api.onClose?.(); w.el.remove(); wins.delete(id);
+  if (focusedId === id) {
+    focusedId = null;
+    const next = [...wins.values()].filter(o => !o.min).sort((a, b) => b.el.style.zIndex - a.el.style.zIndex)[0];
+    if (next) focusWin(next.id); else $("#appName").textContent = "Desktop";
+  }
+  renderTaskbar();
+}
+function toggleMin(id) {
+  const w = wins.get(id); w.min = !w.min; w.el.style.display = w.min ? "none" : "";
+  if (w.min && focusedId === id) { focusedId = null; $("#appName").textContent = "Desktop"; }
+  if (!w.min) focusWin(id); renderTaskbar();
+}
+function toggleMax(id) {
+  const w = wins.get(id), s = w.el.style;
+  if (!w.max) { w.prev = { left: s.left, top: s.top, width: s.width, height: s.height }; Object.assign(s, { left: "0px", top: "34px", width: innerWidth + "px", height: (innerHeight - 34 - 64) + "px" }); }
+  else Object.assign(s, w.prev);
+  w.max = !w.max; w.el.classList.toggle("max", w.max); w.api.onResize?.();
+}
+function dragify(w, handle) {
+  handle.addEventListener("pointerdown", e => {
+    if (e.button !== 0 || e.target.closest("button") || innerWidth <= 700) return;
+    if (w.max) { // pull a maximized window back down under the pointer
+      const ratio = e.clientX / innerWidth; toggleMax(w.id);
+      w.el.style.left = (e.clientX - parseFloat(w.el.style.width) * ratio) + "px"; w.el.style.top = "34px";
+    }
+    const sx = e.clientX - w.el.offsetLeft, sy = e.clientY - w.el.offsetTop;
+    handle.setPointerCapture(e.pointerId);
+    const mv = ev => {
+      w.el.style.left = Math.min(innerWidth - 80, Math.max(-parseFloat(w.el.style.width) + 80, ev.clientX - sx)) + "px";
+      w.el.style.top = Math.min(innerHeight - 60, Math.max(34, ev.clientY - sy)) + "px";
+    };
+    const up = () => { handle.removeEventListener("pointermove", mv); handle.removeEventListener("pointerup", up); };
+    handle.addEventListener("pointermove", mv); handle.addEventListener("pointerup", up);
+  });
+}
+function resizify(w, grip) {
+  grip.addEventListener("pointerdown", e => {
+    e.preventDefault(); e.stopPropagation(); grip.setPointerCapture(e.pointerId);
+    const sx = e.clientX, sy = e.clientY, sw = w.el.offsetWidth, sh = w.el.offsetHeight;
+    const mv = ev => { w.el.style.width = Math.max(300, sw + ev.clientX - sx) + "px"; w.el.style.height = Math.max(180, sh + ev.clientY - sy) + "px"; w.api.onResize?.(); };
+    const up = () => { grip.removeEventListener("pointermove", mv); grip.removeEventListener("pointerup", up); };
+    grip.addEventListener("pointermove", mv); grip.addEventListener("pointerup", up);
+  });
+}
+function renderTaskbar() {
+  const tb = $("#taskbar"); tb.innerHTML = "";
+  wins.forEach(w => {
+    const a = APPS[w.app];
+    const b = h(`<button class="${w.id === focusedId ? "active" : ""} ${w.min ? "min" : ""}" title="${esc(w.title)}"><span class="ic ${a.color}">${I[a.icon]}</span><span class="lbl">${esc(w.title.length > 22 ? w.title.slice(0, 21) + "…" : w.title)}</span></button>`);
+    b.onclick = () => { if (w.min) toggleMin(w.id); else if (w.id === focusedId) toggleMin(w.id); else focusWin(w.id); };
+    tb.append(b);
+  });
+}
+
+/* =====================================================================
+   App: Terminal
+   ===================================================================== */
+APPS.term = { name: "Terminal", icon: "term", color: "c-term", w: 680, h: 420, mount(body, win, args) {
+  let cwd = norm(args.cwd || HOME);
+  const hist = store.get("history", []); let hi = hist.length;
+  body.style.background = "var(--term-bg)";
+  const t = h(`<div class="term"><div class="out"></div><div class="line"><span class="ps"></span><input aria-label="Command" autocomplete="off" autocapitalize="off" spellcheck="false"></div></div>`);
+  body.append(t);
+  const out = $(".out", t), inp = $("input", t), ps = $(".ps", t);
+  const prompt = () => `micah@mz:<b>${esc(cwd.replace(HOME, "~"))}</b>$`;
+  const setPs = () => { ps.innerHTML = prompt(); win.setTitle("Terminal — " + cwd.replace(HOME, "~")); };
+  const print = (html = "") => { out.insertAdjacentHTML("beforeend", html + "\n"); body.scrollTop = body.scrollHeight; };
+  const p = s => print(esc(s));
+  t.onclick = () => { if (!getSelection().toString()) inp.focus(); };
+
+  const split = line => { const r = []; let m; const re = /"([^"]*)"|'([^']*)'|(\S+)/g; while ((m = re.exec(line))) r.push(m[1] ?? m[2] ?? m[3]); return r; };
+  const cmds = {
+    help: () => print(
+`<span class="hi">MZ/OS shell</span>
+  <b>ls</b> [dir]          list files            <b>cd</b> [dir]       change directory
+  <b>cat</b> file          print a file          <b>pwd</b>            where am I
+  <b>edit</b> file         open in Notes         <b>open</b> path|app  open a file, folder or app
+  <b>mkdir</b> dir         make a folder         <b>touch</b> file     make an empty file
+  <b>rm</b> path           delete                <b>echo</b> text [> file]
+  <b>guestprep</b> "Name" [flags]   build a guestprep run for your own computer
+  <b>q</b> text            add a question to Run of Show
+  <b>apps</b>              list apps             <b>whoami</b>, <b>date</b>, <b>uname</b>, <b>history</b>, <b>clear</b>, <b>reboot</b>`),
+    ls: a => {
+      const path = norm(a[0], cwd), n = node(path);
+      if (!n) return print(`<span class="err">ls: ${esc(a[0])}: no such file or directory</span>`);
+      if (n.type === "file") return p(baseName(path));
+      const names = Object.keys(n.children).sort();
+      print(names.map(k => n.children[k].type === "dir" ? `<span class="dir">${esc(k)}/</span>` : esc(k)).join("  ") || '<span class="dim">(empty)</span>');
+    },
+    cd: a => {
+      const path = norm(a[0] || HOME, cwd), n = node(path);
+      if (!n || n.type !== "dir") return print(`<span class="err">cd: ${esc(a[0])}: not a directory</span>`);
+      cwd = path; setPs();
+    },
+    pwd: () => p(cwd),
+    cat: a => {
+      if (!a.length) return print('<span class="err">usage: cat file</span>');
+      for (const f of a) { const n = node(norm(f, cwd)); if (!n || n.type !== "file") print(`<span class="err">cat: ${esc(f)}: no such file</span>`); else p(n.content.replace(/\n$/, "")); }
+    },
+    edit: a => { if (!a[0]) return print('<span class="err">usage: edit file</span>'); const path = norm(a[0], cwd); if (!node(path)) try { writeFile(path, ""); } catch (e) { return print(`<span class="err">${esc(e.message)}</span>`); } openApp("notes", { path }); },
+    open: a => {
+      if (!a[0]) return print('<span class="err">usage: open path|app</span>');
+      const key = a[0].toLowerCase().replace(/\s+/g, "");
+      const app = Object.entries(APPS).find(([k, v]) => k === key || v.name.toLowerCase().replace(/\s+/g, "") === key);
+      if (app) return openApp(app[0]);
+      const path = norm(a[0], cwd); if (!node(path)) return print(`<span class="err">open: ${esc(a[0])}: not found</span>`); openPath(path);
+    },
+    mkdir: a => a.forEach(d => { try { mkdir(norm(d, cwd)); } catch (e) { print(`<span class="err">mkdir: ${esc(e.message)}</span>`); } }),
+    touch: a => a.forEach(f => { const path = norm(f, cwd); if (!node(path)) try { writeFile(path, ""); } catch (e) { print(`<span class="err">touch: ${esc(e.message)}</span>`); } }),
+    rm: a => a.filter(x => !x.startsWith("-")).forEach(f => { try { remove(norm(f, cwd)); } catch (e) { print(`<span class="err">rm: ${esc(e.message)}</span>`); } }),
+    echo: (a, raw) => {
+      const m = raw.match(/^echo\s+(.*?)\s*(>>?)\s*(\S+)\s*$/);
+      if (m) {
+        const path = norm(m[3], cwd), text = split(m[1]).join(" ") + "\n", ex = node(path);
+        try { writeFile(path, (m[2] === ">>" && ex && ex.type === "file" ? ex.content : "") + text); } catch (e) { print(`<span class="err">echo: ${esc(e.message)}</span>`); }
+      } else p(a.join(" "));
+    },
+    whoami: () => p("micah"),
+    date: () => p(new Date().toString()),
+    uname: () => p("MZ/OS 1.0 mz browser"),
+    hostname: () => p("mz"),
+    history: () => hist.forEach((c, i) => p(String(i + 1).padStart(4) + "  " + c)),
+    clear: () => { out.innerHTML = ""; },
+    apps: () => Object.entries(APPS).forEach(([k, v]) => print(`  <span class="hi">${k.padEnd(8)}</span>${esc(v.name)}`)),
+    reboot: () => location.reload(),
+    q: a => { if (!a.length) return print('<span class="err">usage: q your question</span>'); ROS.add(a.join(" "), "terminal"); print('<span class="ok">added to Run of Show</span>'); },
+    guestprep: (a, raw) => {
+      if (!a.length) return print('<span class="err">usage: guestprep "Guest Name" [--web] [--topic "..."] ...</span>\n<span class="dim">or type</span> open guestprep <span class="dim">for the form</span>');
+      const cmd = raw.trim();
+      print(`<span class="dim">guestprep downloads YouTube captions, and YouTube blocks requests from browsers and cloud servers.
+Run this in Terminal on your own computer:</span>\n\n  <span class="hi">${esc(cmd)}</span>\n\n<span class="dim">It writes guestprep-&lt;guest&gt;.md and .json. Drop the .json into Files and it opens in Prep Sheets.</span>`);
+      copyText(cmd);
+    },
+    sudo: () => print('<span class="err">micah is already in charge here.</span>'),
+    exit: () => closeWin(win.id),
+  };
+  cmds.ll = cmds.ls; cmds.dir = cmds.ls; cmds.vi = cmds.vim = cmds.nano = cmds.edit; cmds.cls = cmds.clear;
+
+  function run(line) {
+    print(`<span class="ps">${prompt()}</span> ${esc(line)}`);
+    if (!line.trim()) return;
+    hist.push(line); if (hist.length > 200) hist.shift(); store.set("history", hist); hi = hist.length;
+    const a = split(line), c = a.shift();
+    if (cmds[c]) { try { cmds[c](a, line); } catch (e) { print(`<span class="err">${esc(e.message)}</span>`); } }
+    else print(`<span class="err">${esc(c)}: command not found</span> <span class="dim">(try "help")</span>`);
+  }
+  inp.addEventListener("keydown", e => {
+    if (e.key === "Enter") { run(inp.value); inp.value = ""; }
+    else if (e.key === "ArrowUp") { if (hi > 0) inp.value = hist[--hi]; e.preventDefault(); }
+    else if (e.key === "ArrowDown") { hi = Math.min(hist.length, hi + 1); inp.value = hist[hi] || ""; e.preventDefault(); }
+    else if (e.key === "l" && e.ctrlKey) { out.innerHTML = ""; e.preventDefault(); }
+    else if (e.key === "Tab") {
+      e.preventDefault();
+      const m = inp.value.match(/^(.*?)(\S*)$/), word = m[2];
+      const isCmd = !m[1].trim();
+      let opts;
+      if (isCmd) opts = Object.keys(cmds).filter(k => k.startsWith(word));
+      else {
+        const slash = word.lastIndexOf("/"), dirPart = slash >= 0 ? word.slice(0, slash + 1) : "", stem = word.slice(slash + 1);
+        const dn = node(norm(dirPart || ".", cwd));
+        opts = dn && dn.type === "dir" ? Object.keys(dn.children).filter(k => k.startsWith(stem)).map(k => dirPart + k + (dn.children[k].type === "dir" ? "/" : "")) : [];
+      }
+      if (opts.length === 1) inp.value = m[1] + opts[0] + (isCmd ? " " : "");
+      else if (opts.length > 1) { print(`<span class="ps">${prompt()}</span> ${esc(inp.value)}`); p(opts.join("  ")); }
+    }
+  });
+  const motd = node("/etc/motd");
+  print(`<span class="hi">MZ/OS</span> <span class="dim">${new Date().toDateString()}</span>\n${esc(motd ? motd.content.trim() : "")}\n<span class="dim">Type "help" to see what this shell can do.</span>\n`);
+  setPs(); setTimeout(() => inp.focus(), 30);
+  return { onFocus: () => setTimeout(() => inp.focus(), 0) };
+} };
+
+/* =====================================================================
+   App: Files
+   ===================================================================== */
+APPS.files = { name: "Files", icon: "files", color: "c-files", w: 680, h: 440, mount(body, win, args) {
+  let cwd = norm(args.path || HOME), sel = null;
+  const el = h(`<div class="files"><aside></aside><main>
+    <div class="toolbar"><button class="btn sm up" aria-label="Up one folder">↑</button><span class="crumbs"></span>
+      <button class="btn sm nf">New file</button><button class="btn sm nd">New folder</button><button class="btn sm imp">Import…</button><button class="btn sm del" disabled>Delete</button></div>
+    <div class="grid" tabindex="0"></div><input type="file" multiple hidden></main></div>`);
+  body.append(el);
+  const grid = $(".grid", el), fileIn = $("input[type=file]", el);
+  const places = [["Home", HOME], ["Notes", HOME + "/notes"], ["Prep sheets", HOME + "/prep"], ["Shows", HOME + "/shows"], ["System", "/etc"]];
+  function render() {
+    if (!node(cwd)) cwd = HOME;
+    win.setTitle("Files — " + (cwd === HOME ? "Home" : baseName(cwd)));
+    $("aside", el).innerHTML = places.map(([n, p]) => `<button data-p="${esc(p)}" class="${p === cwd ? "on" : ""}">${esc(n)}</button>`).join("");
+    $$("aside button", el).forEach(b => b.onclick = () => go(b.dataset.p));
+    $(".crumbs", el).textContent = cwd.replace(HOME, "~");
+    const n = node(cwd), names = Object.keys(n.children).sort((a, b) => (n.children[b].type === "dir") - (n.children[a].type === "dir") || a.localeCompare(b));
+    grid.innerHTML = names.length ? "" : '<div class="empty" style="grid-column:1/-1">Empty folder. Drop files here from your computer.</div>';
+    for (const k of names) {
+      const c = n.children[k], path = cwd + "/" + k;
+      const ic = c.type === "dir" ? I.folder : isPrep(path, c) ? I.json : I.doc;
+      const b = h(`<button class="fitem ${sel === path ? "sel" : ""}" title="${esc(k)}">${ic}<span>${esc(k)}</span></button>`);
+      b.onclick = () => { sel = path; render(); if (matchMedia("(pointer: coarse)").matches) openPath(path); };
+      b.ondblclick = () => openPath(path);
+      b.onkeydown = e => { if (e.key === "Enter") openPath(path); };
+      grid.append(b);
+    }
+    $(".del", el).disabled = !sel;
+    $(".up", el).disabled = cwd === "/";
+  }
+  const go = p => { cwd = p; sel = null; render(); };
+  $(".up", el).onclick = () => go(parentOf(cwd));
+  $(".nf", el).onclick = () => { const name = prompt("New file name", "untitled.txt"); if (!name) return; try { const p = uniquePath(cwd, name.replace(/\//g, "-")); writeFile(p, ""); openApp("notes", { path: p }); } catch (e) { toast(e.message); } };
+  $(".nd", el).onclick = () => { const name = prompt("New folder name", "untitled folder"); if (!name) return; try { mkdir(cwd + "/" + name.replace(/\//g, "-")); } catch (e) { toast(e.message); } };
+  $(".del", el).onclick = () => { if (sel && confirm(`Delete ${baseName(sel)}?`)) { try { remove(sel); sel = null; } catch (e) { toast(e.message); } } };
+  $(".imp", el).onclick = () => fileIn.click();
+  async function importFiles(list) {
+    let last = null;
+    for (const f of list) {
+      if (f.size > 4e6) { toast(f.name + " is too big (4 MB max)"); continue; }
+      const text = await f.text(); last = uniquePath(cwd, f.name); writeFile(last, text);
+    }
+    if (last && list.length === 1) openPath(last);
+  }
+  fileIn.onchange = () => { importFiles([...fileIn.files]); fileIn.value = ""; };
+  grid.addEventListener("dragover", e => { e.preventDefault(); grid.classList.add("drop"); });
+  grid.addEventListener("dragleave", () => grid.classList.remove("drop"));
+  grid.addEventListener("drop", e => { e.preventDefault(); grid.classList.remove("drop"); importFiles([...e.dataTransfer.files]); });
+  grid.onclick = e => { if (e.target === grid) { sel = null; render(); } };
+  fsListeners.add(render); render();
+  return { onClose: () => fsListeners.delete(render), onArgs: a => a.path && go(norm(a.path)) };
+} };
+
+/* =====================================================================
+   App: Notes
+   ===================================================================== */
+APPS.notes = { name: "Notes", icon: "notes", color: "c-notes", w: 560, h: 460, mount(body, win, args) {
+  let path = args.path;
+  if (!path) { path = uniquePath(HOME + "/notes", "note " + new Date().toISOString().slice(0, 10) + ".txt"); writeFile(path, ""); }
+  const n = node(path);
+  const el = h(`<div class="notes ${/\.(json|md|py|js|sh|csv)$/.test(path) ? "mono" : ""}">
+    <textarea spellcheck="true" aria-label="Note text"></textarea><div class="status"><span class="where"></span><span class="st">Saved</span></div></div>`);
+  body.append(el);
+  const ta = $("textarea", el), st = $(".st", el);
+  ta.value = n ? n.content : "";
+  $(".where", el).textContent = path.replace(HOME, "~");
+  win.setTitle(baseName(path));
+  let timer;
+  const save = () => { try { writeFile(path, ta.value); st.textContent = "Saved"; } catch (e) { st.textContent = e.message; } };
+  ta.addEventListener("input", () => { st.textContent = "Editing…"; clearTimeout(timer); timer = setTimeout(save, 400); });
+  ta.addEventListener("keydown", e => { if ((e.metaKey || e.ctrlKey) && e.key === "s") { e.preventDefault(); clearTimeout(timer); save(); } });
+  setTimeout(() => ta.focus(), 30);
+  return { onClose: () => { clearTimeout(timer); if (node(path) && node(path).content !== ta.value) save(); }, onFocus: () => ta.focus() };
+} };
+
+/* =====================================================================
+   App: Guest Prep (command builder for the guestprep CLI)
+   ===================================================================== */
+APPS.prep = { name: "Guest Prep", icon: "prep", color: "c-prep", w: 640, h: 600, single: true, mount(body, win, args) {
+  const st = Object.assign({ guest: "", about: "", topic: "", writing: "", urls: "", n: 15, web: true, guide: true, fast: false, cookies: "", }, store.get("prep", {}), args);
+  const el = h(`<div class="pad">
+    <p class="muted" style="margin-top:0">Fill this in for your next guest. It builds the <b>guestprep</b> command to run on your own computer
+      (YouTube blocks caption downloads from browsers and cloud servers).</p>
+    <div class="field"><label for="g-guest">Guest's full name</label><input id="g-guest" type="text" data-k="guest" placeholder="Morgan Housel"></div>
+    <div class="field"><label for="g-about">Who they are <span class="muted">(rules out people with the same name)</span></label><input id="g-about" type="text" data-k="about" placeholder="author of The Psychology of Money"></div>
+    <div class="field"><label for="g-topic">Topic for the interview <span class="muted">(optional)</span></label><input id="g-topic" type="text" data-k="topic" placeholder="being a person"></div>
+    <div class="field"><label for="g-writing">Their Substack or posts <span class="muted">(one URL per line, optional)</span></label><textarea id="g-writing" rows="2" data-k="writing" placeholder="https://name.substack.com"></textarea></div>
+    <label class="check"><input type="checkbox" data-k="web"><span>Search the whole web too<small>Podcast sites, written interviews, talks (--web)</small></span></label>
+    <label class="check"><input type="checkbox" data-k="guide"><span>Write the researched guide<small>Background, timeline, main ideas with checked quotes, reading list</small></span></label>
+    <label class="check"><input type="checkbox" data-k="fast"><span>Fast run<small>Every step on the faster model (--fast)</small></span></label>
+    <details class="more"><summary>More options</summary>
+      <div class="two">
+        <div class="field"><label for="g-n">Interviews to read</label><input id="g-n" type="number" min="1" max="60" data-k="n"></div>
+        <div class="field"><label for="g-ck">Use YouTube login from</label><select id="g-ck" data-k="cookies"><option value="">(none)</option><option>chrome</option><option>safari</option><option>firefox</option><option>edge</option><option>brave</option></select></div>
+      </div>
+      <div class="field"><label for="g-urls">Known appearances <span class="muted">(YouTube URLs, one per line)</span></label><textarea id="g-urls" rows="2" data-k="urls"></textarea></div>
+    </details>
+    <p class="muted" style="font-size:12.5px">First time? Run <code>bash install.sh</code> from the guestprep folder, and set <code>ANTHROPIC_API_KEY</code>.
+      The run writes <code>guestprep-&lt;guest&gt;.md</code> and a <code>.json</code>. Drop the .json into Files to work with it here.</p>
+    <div class="cmdbar">
+      <h3 class="sec" style="margin:0 0 8px">Run this on your computer</h3>
+      <div class="cmd" aria-live="polite"></div>
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+        <button class="btn pri copy">Copy command</button><button class="btn save">Save to notes</button><button class="btn sheet">Open a prep sheet…</button>
+      </div>
+    </div>
+  </div>`);
+  body.append(el);
+  const q = s => /^[A-Za-z0-9_./:@%+=,-]+$/.test(s) ? s : `"${s.replace(/(["\\$`])/g, "\\$1")}"`;
+  const lines = s => s.split(/\s+/).map(x => x.trim()).filter(Boolean);
+  function build() {
+    const parts = ["guestprep", q(st.guest.trim() || "Guest Name")];
+    if (st.about.trim()) parts.push("--about", q(st.about.trim()));
+    if (st.topic.trim()) parts.push("--topic", q(st.topic.trim()));
+    if (+st.n && +st.n !== 15) parts.push("-n", String(+st.n));
+    if (st.web) parts.push("--web");
+    lines(st.writing).forEach(u => parts.push("--writing", q(u)));
+    lines(st.urls).forEach(u => parts.push("--url", q(u)));
+    if (!st.guide) parts.push("--no-guide");
+    if (st.fast) parts.push("--fast");
+    if (st.cookies) parts.push("--cookies-from-browser", st.cookies);
+    return parts;
+  }
+  function render() {
+    const parts = build();
+    $(".cmd", el).innerHTML = parts.map((p, i) => i === 0 ? `<span class="hi">${esc(p)}</span>` : p.startsWith("-") ? (parts.length > 4 ? " \\\n  " : " ") + esc(p) : " " + esc(p)).join("");
+    win.setTitle(st.guest.trim() ? "Guest Prep — " + st.guest.trim() : "Guest Prep");
+    store.set("prep", st);
+  }
+  $$("[data-k]", el).forEach(inp => {
+    const k = inp.dataset.k;
+    if (inp.type === "checkbox") inp.checked = !!st[k]; else inp.value = st[k] ?? "";
+    inp.addEventListener("input", () => { st[k] = inp.type === "checkbox" ? inp.checked : inp.type === "number" ? +inp.value : inp.value; render(); });
+  });
+  $(".copy", el).onclick = () => copyText(build().join(" "));
+  $(".save", el).onclick = () => {
+    const name = (st.guest.trim() || "guest").toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    const p = uniquePath(HOME + "/notes", `prep-${name}.txt`);
+    writeFile(p, `Prep: ${st.guest}\n${st.about ? "Who: " + st.about + "\n" : ""}${st.topic ? "Topic: " + st.topic + "\n" : ""}\nCommand:\n${build().join(" ")}\n\nNotes:\n`);
+    openApp("notes", { path: p });
+  };
+  $(".sheet", el).onclick = () => openApp("files", { path: HOME + "/prep" });
+  render();
+  setTimeout(() => { if (!el.contains(document.activeElement)) $("#g-guest", el).focus(); }, 30);
+} };
+
+/* =====================================================================
+   App: Prep Sheets (reads guestprep's .json)
+   ===================================================================== */
+APPS.sheet = { name: "Prep Sheets", icon: "sheet", color: "c-sheet", w: 760, h: 560, single: true, mount(body, win, args) {
+  let path = args.path, data = null, tab = "fresh";
+  const WORN = 3;
+  function load() {
+    data = null;
+    if (!path) { const dir = node(HOME + "/prep"); const first = dir && Object.keys(dir.children).find(k => isPrep(HOME + "/prep/" + k, dir.children[k])); if (first) path = HOME + "/prep/" + first; }
+    const n = path && node(path);
+    if (n) { try { data = JSON.parse(n.content); } catch { data = { error: true }; } }
+    render();
+  }
+  const link = (epMap, m) => {
+    const v = epMap[m.episode_id]; if (!v) return "";
+    if (v.local_path) return ""; if (v.page_url) return v.page_url;
+    if (!v.id || v.id.startsWith("demo")) return "";
+    return `https://www.youtube.com/watch?v=${encodeURIComponent(v.id)}` + (m.seconds > 0 ? `&t=${Math.floor(m.seconds)}s` : "");
+  };
+  const addBtn = (text, src) => `<button class="btn sm add" data-t="${esc(text)}" data-s="${esc(src)}" title="Add to Run of Show">+ Show</button>`;
+  function renderGuide(g) {
+    if (!g || typeof g !== "object") return '<div class="empty">No guide in this sheet (it was run with --no-guide).</div>';
+    const val = v => {
+      if (v == null || v === "") return "";
+      if (typeof v === "string") return `<p>${esc(v)}</p>`;
+      if (Array.isArray(v)) return `<ul>${v.map(x => `<li>${typeof x === "object" ? obj(x) : esc(x)}</li>`).join("")}</ul>`;
+      return obj(v);
+    };
+    const obj = o => {
+      if (o.quote) return `<blockquote>${esc(o.quote)}</blockquote>${o.source_url ? `<a href="${esc(o.source_url)}" target="_blank" rel="noopener">${esc(o.source_title || o.source_url)}</a>` : ""}`;
+      if (o.when && o.what) return `<b>${esc(o.when)}</b> — ${esc(o.what)}`;
+      if (o.title && o.url) return `<a href="${esc(o.url)}" target="_blank" rel="noopener">${esc(o.title)}</a>${o.kind ? ` <span class="pill">${esc(o.kind)}</span>` : ""}${o.why ? ` <span class="muted">— ${esc(o.why)}</span>` : ""}`;
+      if (o.point) return `${esc(o.point)}${o.source_url ? ` <a href="${esc(o.source_url)}" target="_blank" rel="noopener">source</a>` : ""}`;
+      return Object.entries(o).map(([k, v]) => k === "name" ? `<b>${esc(v)}</b>` : val(v)).join("");
+    };
+    return `<div class="guide">${Object.entries(g).map(([k, v]) => v && (typeof v !== "object" || Object.keys(v).length) ? `<h3>${esc(k.replace(/_/g, " "))}</h3>${val(v)}` : "").join("")}</div>`;
+  }
+  function render() {
+    body.innerHTML = "";
+    const n = path && node(path);
+    if (!data || data.error) {
+      win.setTitle("Prep Sheets");
+      body.append(h(`<div class="empty">${data?.error ? "That file isn't a guestprep .json." : "No prep sheet open."}<br><br>
+        Run <b>guestprep</b> on your computer, then drop the <code>.json</code> into <b>Files → Prep sheets</b>.<br><br>
+        <button class="btn pri">Open Files</button></div>`));
+      $(".btn", body).onclick = () => openApp("files", { path: HOME + "/prep" });
+      return;
+    }
+    win.setTitle("Prep — " + (data.guest || baseName(path)));
+    const eps = data.episodes || [], epMap = Object.fromEntries(eps.map(e => [e.video.id, e.video]));
+    const clusters = [...(data.clusters || [])].sort((a, b) => b.times_asked - a.times_asked);
+    const worn = clusters.filter(c => c.times_asked >= WORN), twice = clusters.filter(c => c.times_asked > 1 && c.times_asked < WORN), once = clusters.filter(c => c.times_asked <= 1);
+    const fresh = data.suggestions?.fresh_questions || [], noctx = data.suggestions?.no_context_prompts || [];
+    const threads = eps.flatMap(e => (e.unexplored_threads || []).map(t => ({ t, v: e.video })));
+    const tabs = [["fresh", "Fresh", fresh.length], ["noctx", "No-context", noctx.length], ["threads", "Threads", threads.length], ["worn", "Worn out", worn.length], ["twice", "Asked twice+", twice.length], ["once", "Asked once", once.length], ["guide", "Guide", ""], ["eps", "Interviews", eps.length]];
+    const tabBar = h(`<div class="tabs" role="tablist">${tabs.map(([k, l, c]) => `<button role="tab" data-t="${k}" class="${tab === k ? "on" : ""}" aria-selected="${tab === k}">${l}${c !== "" ? `<span class="n">${c}</span>` : ""}</button>`).join("")}</div>`);
+    body.append(tabBar);
+    $$("button", tabBar).forEach(b => b.onclick = () => { tab = b.dataset.t; render(); });
+    const wrap = h(`<div class="pad sheet"></div>`); body.append(wrap);
+    const clusterCard = c => `<div class="card"><div class="row"><div><p class="q">${esc(c.canonical_question)}</p>
+        <span class="pill ${c.times_asked >= WORN ? "hot" : ""}">asked in ${c.times_asked} of ${eps.length}</span> <span class="muted" style="font-size:12px">${esc(c.label || "")}</span>
+        <ul class="asked">${(c.members || []).map(m => { const u = link(epMap, m), v = epMap[m.episode_id];
+          return `<li>“${esc(m.question)}” — ${esc(v?.channel || v?.title || "")}${m.seconds != null ? ` ${u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${fmtClock(m.seconds)}</a>` : fmtClock(m.seconds)}` : ""}</li>`; }).join("")}</ul>
+      </div></div></div>`;
+    let html = "";
+    if (tab === "fresh") html = fresh.length ? fresh.map(s => `<div class="card"><div class="row"><div><p class="q">${esc(s.question)}</p><p class="why">${esc(s.why)}${s.builds_on ? ` <i>Builds on: ${esc(s.builds_on)}.</i>` : ""}</p></div>${addBtn(s.question, "fresh")}</div></div>`).join("") : '<div class="empty">No fresh questions in this sheet.</div>';
+    if (tab === "noctx") html = noctx.length ? noctx.map(s => `<div class="card"><div class="row"><div><p class="q">${esc(s.prompt)}</p><p class="why"><span class="pill">${esc(s.technique)}</span> ${esc(s.why)}</p></div>${addBtn(s.prompt, "no-context")}</div></div>`).join("") : '<div class="empty">No prompts in this sheet.</div>';
+    if (tab === "threads") html = threads.length ? threads.map(x => `<div class="card"><div class="row"><div><p class="q" style="font-weight:500">${esc(x.t)}</p><p class="why">${esc(x.v.channel || x.v.title)}</p></div>${addBtn("Follow up: " + x.t, "thread")}</div></div>`).join("") : '<div class="empty">No loose threads found.</div>';
+    if (tab === "worn") html = (worn.length ? `<p class="muted" style="margin-top:0">Skip these, or ask them in a way nobody has.</p>` + worn.map(clusterCard).join("") : '<div class="empty">Nothing asked in 3 or more interviews.</div>');
+    if (tab === "twice") html = twice.length ? twice.map(clusterCard).join("") : '<div class="empty">None.</div>';
+    if (tab === "once") html = once.length ? once.map(clusterCard).join("") : '<div class="empty">None.</div>';
+    if (tab === "guide") html = renderGuide(data.guide);
+    if (tab === "eps") html = eps.map(e => { const v = e.video, u = v.page_url || (v.id && !v.id.startsWith("demo") && !v.local_path ? "https://www.youtube.com/watch?v=" + encodeURIComponent(v.id) : "");
+      return `<div class="card"><h4>${u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(v.title)}</a>` : esc(v.title)}</h4><span class="muted">${esc(v.channel)}${v.duration ? " · " + fmtClock(v.duration) : ""} · ${(e.questions || []).length} questions</span></div>`; }).join("") +
+      ((data.audio_only || []).length ? `<h3 class="sec">Audio only</h3>` + data.audio_only.map(a => `<div class="card"><a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.title || a.url)}</a> <span class="muted">${esc(a.outlet || "")}</span></div>`).join("") : "");
+    wrap.innerHTML = `<p class="muted" style="margin:0 0 12px;font-size:12px;font-family:var(--mono)">${esc(path.replace(HOME, "~"))}</p>` + html;
+    $$(".add", wrap).forEach(b => b.onclick = () => { ROS.add(b.dataset.t, b.dataset.s + " · " + (data.guest || "")); b.textContent = "✓ Added"; b.disabled = true; });
+  }
+  const onFs = () => { const n = path && node(path); if (!n) { path = null; } load(); };
+  fsListeners.add(onFs); load();
+  return { onClose: () => fsListeners.delete(onFs), onArgs: a => { if (a.path) { path = a.path; tab = "fresh"; load(); } } };
+} };
+
+/* =====================================================================
+   Run of Show: shared state + app
+   ===================================================================== */
+const ROS = {
+  s: Object.assign({ items: [], startedAt: null, acc: 0, guest: "" }, store.get("ros", {})),
+  subs: new Set(),
+  save() { store.set("ros", this.s); this.subs.forEach(f => f()); updateOnAir(); },
+  elapsed() { return this.s.acc + (this.s.startedAt ? (Date.now() - this.s.startedAt) / 1000 : 0); },
+  running() { return !!this.s.startedAt; },
+  add(text, src = "") { text = String(text).trim(); if (!text) return; this.s.items.push({ id: Date.now() + Math.random(), text, src, done: false, at: null }); this.save(); toast("Added to Run of Show"); },
+};
+function updateOnAir() { $("#onair").classList.toggle("live", ROS.running()); }
+$("#onair").onclick = () => openApp("show");
+
+APPS.show = { name: "Run of Show", icon: "show", color: "c-show", w: 520, h: 560, single: true, mount(body, win) {
+  const el = h(`<div class="ros">
+    <div class="clock"><span class="time" aria-live="off">00:00</span>
+      <button class="btn pri go">Start</button><button class="btn reset">Reset</button>
+      <span style="flex:1"></span><button class="btn sm exp">Save as file</button><button class="btn sm clr">Clear</button></div>
+    <ol></ol>
+    <form class="add"><input class="inp" placeholder="Add a question and press Enter" aria-label="New question"><button class="btn">Add</button></form></div>`);
+  body.append(el);
+  const timeEl = $(".time", el), list = $("ol", el), go = $(".go", el);
+  function render() {
+    const items = ROS.s.items, nextIdx = items.findIndex(i => !i.done);
+    go.textContent = ROS.running() ? "Pause" : ROS.elapsed() > 0 ? "Resume" : "Start";
+    timeEl.classList.toggle("live", ROS.running());
+    list.innerHTML = items.length ? "" : '<div class="empty">No questions yet. Add them here, from Prep Sheets with “+ Show”, or with <code>q</code> in Terminal.</div>';
+    items.forEach((it, i) => {
+      const li = h(`<li class="${it.done ? "done" : ""} ${i === nextIdx && ROS.elapsed() > 0 ? "next" : ""}">
+        <input type="checkbox" ${it.done ? "checked" : ""} aria-label="Asked">
+        <div class="txt"><p>${esc(it.text)}</p><small>${esc(it.src || "")}${it.at != null ? ` · asked at ${fmtClock(it.at)}` : ""}</small></div>
+        <span class="acts"><button class="u" aria-label="Move up">↑</button><button class="d" aria-label="Move down">↓</button><button class="r" aria-label="Remove">×</button></span></li>`);
+      $("input", li).onchange = e => { it.done = e.target.checked; it.at = it.done ? Math.floor(ROS.elapsed()) : null; ROS.save(); };
+      $(".u", li).onclick = () => { if (i > 0) { items.splice(i - 1, 0, items.splice(i, 1)[0]); ROS.save(); } };
+      $(".d", li).onclick = () => { if (i < items.length - 1) { items.splice(i + 1, 0, items.splice(i, 1)[0]); ROS.save(); } };
+      $(".r", li).onclick = () => { items.splice(i, 1); ROS.save(); };
+      list.append(li);
+    });
+    tick();
+  }
+  const tick = () => { timeEl.textContent = fmtClock(ROS.elapsed()); };
+  go.onclick = () => { if (ROS.running()) { ROS.s.acc = ROS.elapsed(); ROS.s.startedAt = null; } else ROS.s.startedAt = Date.now(); ROS.save(); };
+  $(".reset", el).onclick = () => { if (ROS.elapsed() && !confirm("Reset the show clock and un-check every question?")) return; ROS.s.startedAt = null; ROS.s.acc = 0; ROS.s.items.forEach(i => { i.done = false; i.at = null; }); ROS.save(); };
+  $(".clr", el).onclick = () => { if (ROS.s.items.length && confirm("Remove every question?")) { ROS.s.items = []; ROS.save(); } };
+  $(".exp", el).onclick = () => {
+    const d = new Date().toISOString().slice(0, 10);
+    const txt = `Run of show, ${d}\nLength: ${fmtClock(ROS.elapsed())}\n\n` + ROS.s.items.map((it, i) => `${i + 1}. [${it.done ? "x" : " "}] ${it.text}${it.at != null ? `  (${fmtClock(it.at)})` : ""}`).join("\n") + "\n";
+    const p = uniquePath(HOME + "/shows", `run-of-show-${d}.txt`); writeFile(p, txt); toast("Saved to " + p.replace(HOME, "~"));
+  };
+  $("form", el).onsubmit = e => { e.preventDefault(); const i = $("input", e.target); ROS.add(i.value, "added by hand"); i.value = ""; };
+  const iv = setInterval(tick, 500);
+  ROS.subs.add(render); render();
+  return { onClose: () => { clearInterval(iv); ROS.subs.delete(render); } };
+} };
+
+/* =====================================================================
+   App: Settings
+   ===================================================================== */
+APPS.set = { name: "Settings", icon: "set", color: "c-set", w: 500, h: 520, single: true, mount(body) {
+  const wrap = h(`<div class="pad"></div>`); body.append(wrap);
+  function render() {
+    wrap.innerHTML = `
+      <h3 class="sec">Appearance</h3>
+      <div class="seg" role="radiogroup" aria-label="Theme">${["auto", "light", "dark"].map(t => `<button data-th="${t}" class="${settings.theme === t ? "on" : ""}" role="radio" aria-checked="${settings.theme === t}">${t[0].toUpperCase() + t.slice(1)}</button>`).join("")}</div>
+      <h3 class="sec">Accent</h3>
+      <div class="swatches">${ACCENTS.map(c => `<button class="swatch ${settings.accent === c ? "on" : ""}" style="background:${c}" data-ac="${c}" aria-label="Accent ${c}"></button>`).join("")}</div>
+      <h3 class="sec">Wallpaper</h3>
+      <div class="walls">${Object.entries(WALLS).map(([k, n]) => `<button class="wp-${k} ${settings.wall === k ? "on" : ""}" data-wl="${k}" style="position:relative"><span>${n}</span></button>`).join("")}</div>
+      <h3 class="sec">Startup</h3>
+      <label class="check"><input type="checkbox" class="bt" ${settings.boot ? "checked" : ""}><span>Show the boot screen</span></label>
+      <h3 class="sec">Storage</h3>
+      <p class="muted" style="margin-top:0">Files, notes and your run of show live in this browser only.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn bk">Download a backup</button><button class="btn rs">Restore from backup…</button><button class="btn wipe" style="color:#d91e18">Erase everything</button></div>
+      <input type="file" accept=".json" hidden>`;
+    $$("[data-th]", wrap).forEach(b => b.onclick = () => { settings.theme = b.dataset.th; applySettings(); render(); });
+    $$("[data-ac]", wrap).forEach(b => b.onclick = () => { settings.accent = b.dataset.ac; applySettings(); render(); });
+    $$("[data-wl]", wrap).forEach(b => b.onclick = () => { settings.wall = b.dataset.wl; applySettings(); render(); });
+    $(".bt", wrap).onchange = e => { settings.boot = e.target.checked; applySettings(); };
+    $(".bk", wrap).onclick = () => {
+      const blob = new Blob([JSON.stringify({ mzos: 1, fs: FS, ros: ROS.s, settings }, null, 2)], { type: "application/json" });
+      const a = h(`<a download="mzos-backup-${new Date().toISOString().slice(0, 10)}.json"></a>`); a.href = URL.createObjectURL(blob); a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    };
+    const fi = $("input[type=file]", wrap);
+    $(".rs", wrap).onclick = () => fi.click();
+    fi.onchange = async () => {
+      try { const b = JSON.parse(await fi.files[0].text()); if (!b.mzos || !b.fs) throw 0;
+        if (!confirm("Replace everything here with this backup?")) return;
+        FS = b.fs; fsChanged(); Object.assign(ROS.s, b.ros || {}); ROS.save(); Object.assign(settings, b.settings || {}); applySettings(); render(); toast("Restored");
+      } catch { toast("That isn't an MZ/OS backup."); }
+    };
+    $(".wipe", wrap).onclick = () => { if (confirm("Erase every file, note and setting in MZ/OS? This can't be undone.")) { store.clear(); location.reload(); } };
+  }
+  render();
+} };
+
+/* =====================================================================
+   App: About
+   ===================================================================== */
+APPS.about = { name: "About MZ/OS", icon: "about", color: "c-about", w: 440, h: 400, single: true, mount(body) {
+  const count = n => n.type === "file" ? 1 : Object.values(n.children).reduce((s, c) => s + count(c), 0);
+  let bytes = 0; try { bytes = (localStorage.getItem("mzos.fs") || "").length; } catch {}
+  body.append(h(`<div class="pad" style="text-align:center">
+    <div style="font:700 56px/1 var(--sans);letter-spacing:-.05em;margin:12px 0 4px">MZ<span style="color:var(--accent)">/</span>OS</div>
+    <p class="muted" style="margin:0 0 18px">Micah Zarin's operating system · version 1.0</p>
+    <p style="max-width:330px;margin:0 auto 18px">A desktop for preparing and running interviews. Built around <b>guestprep</b>: find what a guest has already been asked, then ask what nobody has.</p>
+    <div style="display:inline-grid;grid-template-columns:auto auto;gap:4px 16px;text-align:left;font:12.5px var(--mono)">
+      <span class="muted">user</span><span>micah</span>
+      <span class="muted">files</span><span>${count(FS)}</span>
+      <span class="muted">storage</span><span>${(bytes / 1024).toFixed(1)} KB in this browser</span>
+      <span class="muted">questions</span><span>${ROS.s.items.length} in run of show</span>
+    </div></div>`));
+} };
+
+/* =====================================================================
+   Desktop, launcher, clock, shortcuts, boot
+   ===================================================================== */
+const DESK_APPS = ["prep", "sheet", "show", "notes", "files", "term", "set"];
+function renderIcons() {
+  const box = $("#icons"); box.innerHTML = "";
+  DESK_APPS.forEach(k => {
+    const a = APPS[k];
+    const b = h(`<button class="dicon" role="listitem"><span class="ic ${a.color}">${I[a.icon]}</span><span>${esc(a.name)}</span></button>`);
+    b.onclick = () => { $$(".dicon").forEach(x => x.classList.remove("sel")); b.classList.add("sel"); if (matchMedia("(pointer: coarse)").matches || innerWidth <= 700) openApp(k); };
+    b.ondblclick = () => openApp(k);
+    b.onkeydown = e => { if (e.key === "Enter") openApp(k); };
+    box.append(b);
+  });
+}
+const launcher = $("#launcher"), logoBtn = $("#logoBtn");
+function renderLauncher() {
+  launcher.innerHTML = `<div class="who"><b>Micah Zarin</b><span>MZ/OS · ${ROS.s.items.length} questions queued</span></div>` +
+    ["prep", "sheet", "show", "notes", "files", "term"].map(k => `<button class="item" role="menuitem" data-a="${k}"><span class="ic ${APPS[k].color}" style="width:22px;height:22px;border-radius:6px;display:grid;place-items:center">${I[APPS[k].icon].replace("<svg", '<svg width="13" height="13"')}</span>${APPS[k].name}${k === "term" ? '<span class="kbd">Ctrl `</span>' : ""}</button>`).join("") +
+    `<hr><button class="item" role="menuitem" data-a="set">Settings…</button><button class="item" role="menuitem" data-a="about">About MZ/OS</button><button class="item" role="menuitem" data-a="__reboot">Restart</button>`;
+  $$("button", launcher).forEach(b => b.onclick = () => { closeLauncher(); b.dataset.a === "__reboot" ? location.reload() : openApp(b.dataset.a); });
+}
+const closeLauncher = () => { launcher.classList.remove("open"); logoBtn.setAttribute("aria-expanded", "false"); };
+logoBtn.onclick = e => { e.stopPropagation(); const o = !launcher.classList.contains("open"); if (o) renderLauncher(); launcher.classList.toggle("open", o); logoBtn.setAttribute("aria-expanded", o); if (o) $("button", launcher)?.focus(); };
+document.addEventListener("pointerdown", e => { if (!launcher.contains(e.target) && e.target !== logoBtn) closeLauncher(); });
+desk.addEventListener("pointerdown", e => { if (e.target === desk || e.target.id === "wall" || e.target.id === "icons") { $$(".dicon").forEach(x => x.classList.remove("sel")); } });
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") closeLauncher();
+  if (e.ctrlKey && e.key === "`") { e.preventDefault(); openApp("term"); }
+  if (e.altKey && (e.key === "w" || e.key === "∑") && focusedId) { e.preventDefault(); closeWin(focusedId); }
+});
+function clock() {
+  const d = new Date();
+  $("#clock").innerHTML = `<span class="date">${d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })} </span>${d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`;
+}
+addEventListener("resize", () => wins.forEach(w => { if (w.max) Object.assign(w.el.style, { width: innerWidth + "px", height: (innerHeight - 34 - 64) + "px" }); }));
+
+function boot() {
+  const bootEl = $("#boot"), log = $("#bootlog");
+  const done = () => { if (bootEl.classList.contains("gone")) return; bootEl.classList.add("gone"); setTimeout(() => bootEl.remove(), 450); start(); };
+  if (!settings.boot || matchMedia("(prefers-reduced-motion: reduce)").matches) { bootEl.remove(); return start(); }
+  const lines = ["mounting /home/micah", "loading window manager", "loading guestprep bridge", "restoring run of show (" + ROS.s.items.length + " questions)", "checking microphone… not needed", "ready"];
+  bootEl.onclick = done;
+  lines.forEach((l, i) => setTimeout(() => { log.insertAdjacentHTML("beforeend", `<div><span class="ok">[ ok ]</span> ${esc(l)}</div>`); if (i === lines.length - 1) setTimeout(done, 380); }, 140 + i * 170));
+}
+let started = false;
+function start() {
+  if (started) return; started = true;
+  if (!store.get("seen", false)) { store.set("seen", true); openPath(HOME + "/README.txt"); }
+}
+
+applySettings(); renderIcons(); clock(); setInterval(clock, 10000); updateOnAir();
+setInterval(() => { if (ROS.running()) document.title = "● " + fmtClock(ROS.elapsed()) + " · MZ/OS"; else if (document.title !== "MZ/OS") document.title = "MZ/OS"; }, 1000);
+boot();
+</script>
+</body>
+</html>

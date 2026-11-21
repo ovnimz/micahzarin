@@ -44,6 +44,23 @@ guestprep "Morgan Housel"
    - Questions asked only once, collapsed
    - The list of interviews scanned
 
+## MZ/OS
+
+`os/index.html` is a small desktop that runs in the browser, built around
+guestprep. Open the file in any browser; there's nothing to install.
+
+- **Guest Prep**: fill in the guest and get the `guestprep` command to run
+- **Prep Sheets**: drop the `.json` guestprep writes into Files and it opens
+  here, with fresh questions, no-context prompts, loose threads and worn-out
+  questions (with timestamped links). "+ Show" adds a question to the run of show
+- **Run of Show**: today's questions in order, a show clock, and an ON AIR
+  light in the top bar while it runs. Saves as a text file when you're done
+- **Notes**, **Files**, **Terminal** (`help` lists commands; `q <text>` adds a
+  question), **Settings** (theme, accent, wallpaper, backup and restore)
+
+Everything is saved in that browser's local storage; nothing is sent anywhere.
+Settings → Download a backup moves it to another machine.
+
 ## Install
 
 ```
