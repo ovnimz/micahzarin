@@ -8,6 +8,7 @@ import sys
 import time
 from pathlib import Path
 
+from . import books as books_mod
 from . import web
 from . import writing as writing_mod
 from .discover import video_id_from_url
@@ -28,8 +29,13 @@ writing and talks) where you can, not just profiles.
 
 You are also given quotes from the guest's previous interviews, each with \
 its source link, and, when available, the guest's own writing (blog or \
-Substack posts). Treat that writing as the primary source: build the ideas \
-section mainly from it, quote it, and put the best pieces in the reading list.
+Substack posts), and digests of the guest's books, read section by section \
+from PDFs the host supplied. Treat their books and writing as the primary \
+source: build the ideas section mainly from them, explain each idea as the \
+books develop it (the argument, the examples, how it changes from book to \
+book), quote them, and put them in the reading list (for a book, say which \
+chapters or pages to read first). A book quote's source_url is the url given \
+with it, including its #page=N.
 
 Write:
 - summary: 2-3 sentences on who they are and why they matter.
@@ -138,9 +144,15 @@ def build_guide(
     client, model: str, guest: str, about: str, topic: str, episodes: list[Episode], cache_dir: Path,
     effort: str = "high",
     writing: list[dict] | None = None,
+    books: list[dict] | None = None,
 ) -> dict | None:
     writing = writing or []
-    ep_key = ",".join(sorted(ep.video.id for ep in episodes) + sorted(w["url"] for w in writing))
+    books = books or []
+    ep_key = ",".join(
+        sorted(ep.video.id for ep in episodes)
+        + sorted(w["url"] for w in writing)
+        + sorted(f"{b['url']}:{len(b['digests'])}" for b in books)
+    )
     key = hashlib.sha1(f"{guest}|{about}|{topic}|{ep_key}|{model}".lower().encode()).hexdigest()[:12]
     cache = cache_dir / "guide" / f"{key}.json"
     if cache.exists() and time.time() - cache.stat().st_mtime < GUIDE_TTL:
@@ -161,6 +173,7 @@ def build_guide(
             + "\nQuotes from their previous interviews:\n"
             + ("\n".join(lines) or "(none)")
             + (f"\n\nThe guest's own writing:\n\n{writing_mod.for_prompt(writing)}" if writing else "")
+            + (f"\n\nThe guest's books (digests of each section, with exact quotes):\n\n{books_mod.for_prompt(books)}" if books else "")
         )
         try:
             guide, _ = web.run_until_tool(client, model, SYSTEM, user, TOOLS, "submit_guide", effort=effort, max_tokens=32000, rounds=12)
@@ -172,7 +185,7 @@ def build_guide(
             return None
         cache.parent.mkdir(parents=True, exist_ok=True)
         cache.write_text(json.dumps(guide, indent=1))
-    verify_quotes(guide, episodes, cache_dir, writing)
+    verify_quotes(guide, episodes, cache_dir, writing, books)
     return guide
 
 
@@ -190,10 +203,16 @@ def quote_in(quote: str, text_norm: str) -> bool:
     return bool(parts) and all(p in text_norm for p in parts)
 
 
-def verify_quotes(guide: dict, episodes: list[Episode], cache_dir: Path, writing: list[dict] | None = None) -> None:
-    """Mark each quote verified=True/False by finding it in its source (or any transcript/post we read)."""
+def verify_quotes(
+    guide: dict, episodes: list[Episode], cache_dir: Path, writing: list[dict] | None = None, books: list[dict] | None = None
+) -> None:
+    """Mark each quote verified=True/False by finding it in its source (or any transcript/post/book we read)."""
     transcripts = {ep.video.id: _norm(" ".join(s.text for s in ep.segments)) for ep in episodes}
     transcripts.update({w["url"]: _norm(w["text"]) for w in writing or []})
+    # PDF text breaks words across lines with hyphens ("experi-\nence"); join them before matching.
+    for b in books or []:
+        raw = books_mod.full_text(b)
+        transcripts[b["url"]] = _norm(re.sub(r"-\s*\n\s*", "", raw)) + " " + _norm(raw)
     by_url = {}
     for ep in episodes:
         for u in (ep.video.url, ep.video.page_url):
@@ -202,6 +221,8 @@ def verify_quotes(guide: dict, episodes: list[Episode], cache_dir: Path, writing
     pages: dict[str, str | None] = {}
 
     def source_text(url: str) -> str | None:
+        if url.split("#")[0] in transcripts:
+            return transcripts[url.split("#")[0]]
         vid = by_url.get(url.split("#")[0]) or (video_id_from_url(url) if "youtu" in url else None) or url
         if vid in transcripts:
             return transcripts[vid]
