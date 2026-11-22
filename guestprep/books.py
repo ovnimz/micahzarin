@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -89,8 +90,12 @@ def pdf_paths(args: list[Path]) -> list[Path]:
 
 def load_pdf(path: Path) -> dict | None:
     """-> {title, path, url, pages: [text per page]}, or None if there's no text to read."""
+    import logging
+
     from pypdf import PdfReader
 
+    # pypdf warns loudly about harmless quirks in how a PDF was made; keep the terminal readable.
+    logging.getLogger("pypdf").setLevel(logging.ERROR)
     try:
         reader = PdfReader(str(path))
         pages = [(pg.extract_text() or "") for pg in reader.pages]
@@ -105,8 +110,23 @@ def load_pdf(path: Path) -> dict | None:
             file=sys.stderr,
         )
         return None
-    title = meta_title.strip() if len(meta_title.strip()) > 3 else path.stem.replace("_", " ").replace("-", " ")
+    title = pick_title(meta_title, path)
     return {"title": title, "path": str(path), "url": path.resolve().as_uri(), "pages": pages}
+
+
+def pick_title(meta_title: str, path: Path) -> str:
+    """A clean book title from the PDF's title field, else the filename.
+
+    Downloaded PDFs often pack author, publisher, ISBN and a hash into both, separated
+    by runs of spaces or " -- ". The title is the first part.
+    """
+    def first_part(s: str) -> str:
+        return " ".join(re.split(r"\s{2,}|\s--\s|\s\|\s", s.strip())[0].split())
+
+    meta = first_part(meta_title or "")
+    if 3 < len(meta) <= 120:
+        return meta
+    return first_part(path.stem.replace("_", " ")).replace("-", " ").strip() or path.stem
 
 
 def sections(pages: list[str], max_chars: int = SECTION_CHARS) -> list[tuple[int, int, str]]:

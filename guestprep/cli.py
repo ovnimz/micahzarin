@@ -72,8 +72,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--cookies", help="Netscape cookies.txt for YouTube (alternative to --cookies-from-browser)")
     p.add_argument("--proxy", help="HTTP(S) proxy URL for YouTube requests")
     p.add_argument("--model", default=DEFAULT_MODEL, help=f"model for grouping, fresh questions and the guide (default {DEFAULT_MODEL})")
-    p.add_argument("--reader-model", default=FAST_MODEL, help=f"model that reads each transcript and searches the web (default {FAST_MODEL})")
-    p.add_argument("--fast", action="store_true", help="quickest run: every step on the reader model, at lower effort")
+    p.add_argument("--reader-model", default=DEFAULT_MODEL,
+                   help=f"model that reads each transcript and book and searches the web (default {DEFAULT_MODEL})")
+    p.add_argument("--effort", default="high", choices=["low", "medium", "high", "xhigh", "max"],
+                   help="how hard Claude thinks at every step (default high)")
+    p.add_argument("--fast", action="store_true",
+                   help=f"cheaper, quicker run: every step on {FAST_MODEL} at medium effort (about half the cost)")
     p.add_argument("--no-llm", action="store_true", help="keyword heuristics instead of Claude (rough; no API key needed)")
     p.add_argument("--worn-min", type=int, default=3, help="interviews a question must appear in to count as worn out (default 3)")
     p.add_argument("-o", "--out", type=Path, help="report path (default guestprep-<guest>.md); a .json is written alongside")
@@ -110,7 +114,7 @@ def gather_episodes(args: argparse.Namespace, on_episode=None) -> tuple[list[Epi
     if args.web:
         print(f"Searching the web for {args.guest} in the background...", file=sys.stderr)
         bg = ThreadPoolExecutor(max_workers=1)
-        web_search = bg.submit(web.discover, make_client(), args.reader_model, args.guest, args.about, args.cache_dir, args.topic)
+        web_search = bg.submit(web.discover, make_client(), args.reader_model, args.guest, args.about, args.cache_dir, args.topic, args.effort)
         bg.shutdown(wait=False)
 
     if candidates:
@@ -211,14 +215,14 @@ def run(args: argparse.Namespace) -> int:
         clusters = cluster.cluster_heuristic(episodes)
     else:
         client = make_client()
-        model = args.reader_model if args.fast else args.model
-        effort = "medium" if args.fast else "high"
+        model = args.model
+        effort = args.effort
 
         def work(ep: Episode) -> Episode | None:
             try:
                 ok = extract.extract_with_claude(
                     client, args.reader_model, args.guest, ep, args.cache_dir, args.about,
-                    effort="low" if args.fast else "medium",
+                    effort=effort,
                 )
             except LLMError as e:
                 print(f"  extraction failed for {ep.video.title}: {e}", file=sys.stderr)
@@ -235,8 +239,7 @@ def run(args: argparse.Namespace) -> int:
             if args.book:
                 print("Reading their books in the background...", file=sys.stderr)
                 books_job = pool.submit(
-                    books.collect, args.book, client, args.reader_model, args.guest, args.cache_dir,
-                    "low" if args.fast else "medium",
+                    books.collect, args.book, client, args.reader_model, args.guest, args.cache_dir, effort,
                 )
             if args.writing:
                 print("Reading their writing in the background...", file=sys.stderr)
@@ -263,7 +266,7 @@ def run(args: argparse.Namespace) -> int:
                     book_list,
                 )
             print("Grouping repeat questions across interviews...", file=sys.stderr)
-            clusters = cluster.cluster_with_claude(client, model, args.guest, episodes, args.topic, effort="medium")
+            clusters = cluster.cluster_with_claude(client, model, args.guest, episodes, args.topic, effort=effort)
             if not args.no_suggest:
                 print("Writing fresh questions...", file=sys.stderr)
                 suggestions = suggest.suggest(
@@ -296,6 +299,9 @@ def run(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.fast:
+        args.model = args.reader_model = FAST_MODEL
+        args.effort = "medium"
     if args.cookies_from_browser:
         args.cookies = f"browser:{args.cookies_from_browser.lower()}"
     if args.book and args.no_llm:
@@ -316,7 +322,10 @@ def main(argv: list[str] | None = None) -> int:
         import anthropic
 
         if isinstance(e, anthropic.AuthenticationError) or "Could not resolve authentication" in str(e):
-            print("Claude API authentication failed: set ANTHROPIC_API_KEY (or use --no-llm).", file=sys.stderr)
+            detail = getattr(e, "message", None) or str(e)
+            print(f"Claude API authentication failed: {detail}", file=sys.stderr)
+            print("Check the key with: echo ${ANTHROPIC_API_KEY:0:12}  (open a new Terminal window after changing ~/.zshrc)",
+                  file=sys.stderr)
             return 2
         if isinstance(e, anthropic.APIConnectionError):
             print(f"Couldn't reach the Claude API: {e}", file=sys.stderr)
