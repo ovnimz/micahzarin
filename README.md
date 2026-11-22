@@ -72,6 +72,7 @@ guestprep "Jane Doe" --query '"Jane Doe" Lex Fridman'   # extra search terms
 guestprep "Jane Doe" --web                    # also search podcast sites, written interviews, talks
 guestprep "Jane Doe" --topic "being a person"  # focus the sheet and the fresh questions on one topic
 guestprep "Jane Doe" --writing https://jane.substack.com   # read their Substack (or any post URL)
+guestprep "Jane Doe" --book ~/Books/jane-doe/   # read PDFs of their books (a file or a folder)
 guestprep "Jane Doe" --fast                   # quickest: every step on Sonnet
 guestprep "Jane Doe" --no-guide               # questions only, skip the researched guide
 guestprep "Jane Doe" --no-llm                 # keyword heuristics only, no API key (rough)
@@ -87,6 +88,27 @@ newest five plus the most-liked) or individual article URLs, and can be given
 several times. The guide treats that writing as its main source, quotes from it
 (checked word for word), and the fresh questions draw on specific posts. It
 works even when the guest has few or no recorded interviews.
+
+`--book` (or `--pdf`) takes a PDF of the guest's book or paper, or a folder
+of PDFs, and can be given several times. Each book is read in full: Claude
+Sonnet reads it in sections of about 100 pages and notes each section's
+argument, key ideas, memorable examples and anything personal, with exact
+quotes and page numbers. The guide's ideas section is then built from those
+notes, quotes the books with links that open the PDF at the right page
+(`file:///...#page=42`), and the reading list says which chapters to start
+with. Every book quote is checked word for word against the PDF. The fresh
+questions draw on specific arguments and examples, with page numbers. The
+notes are cached, so a book is only read once. It works with no interviews at
+all.
+
+- Page numbers are the PDF's own page numbers, which may differ from the
+  numbers printed in the book.
+- Name the files after the books (`empiricism-and-experience.pdf`). The
+  title comes from the PDF's metadata, or from the filename if there's none.
+- Scanned PDFs have no text to read. Run them through OCR first
+  (`brew install ocrmypdf`, then `ocrmypdf scan.pdf book.pdf`).
+- Cost: a 300-page book is roughly 150-250k input tokens on Sonnet, about
+  $0.50-1 per book, once.
 
 `--transcripts` covers podcasts that aren't on YouTube. Many shows publish
 transcripts on their websites; save them as `.txt` files. Lines may start with

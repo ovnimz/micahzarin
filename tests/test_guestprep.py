@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from guestprep import cli, cluster, discover, extract, report, transcripts
+from guestprep import books, cli, cluster, discover, extract, report, transcripts
 from guestprep.models import Cluster, Episode, Question, Segment, Video, format_timestamp, parse_timestamp
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -559,3 +559,92 @@ def test_guide_failure_keeps_the_questions(tmp_path, monkeypatch):
 def test_ytdlp_opts_tolerate_missing_formats():
     o = transcripts.ytdlp_opts(None, None)
     assert o["ignore_no_formats_error"] is True and o["skip_download"] is True
+
+
+# ---------------------------------------------------------------- --book
+
+def make_pdf(path, pages):
+    """Write a minimal PDF with one text line per entry in each page's list (no extra deps)."""
+    objs = ["<< /Type /Catalog /Pages 2 0 R >>", None, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"]
+    kids = []
+    for lines in pages:
+        ops = "BT /F1 9 Tf 40 800 Td 11 TL " + " ".join(f"({l}) Tj T*" for l in lines) + " ET"
+        objs.append(f"<< /Length {len(ops)} >>\nstream\n{ops}\nendstream")
+        objs.append(f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents {len(objs)} 0 R /Resources << /Font << /F1 3 0 R >> >> >>")
+        kids.append(f"{len(objs)} 0 R")
+    objs[1] = f"<< /Type /Pages /Kids [{' '.join(kids)}] /Count {len(kids)} >>"
+    out, offsets = "%PDF-1.4\n", []
+    for i, o in enumerate(objs, 1):
+        offsets.append(len(out))
+        out += f"{i} 0 obj\n{o}\nendobj\n"
+    xref = len(out)
+    out += f"xref\n0 {len(objs) + 1}\n0000000000 65535 f \n" + "".join(f"{o:010d} 00000 n \n" for o in offsets)
+    out += f"trailer\n<< /Size {len(objs) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n"
+    path.write_bytes(out.encode("latin-1"))
+
+
+BOOK_PAGES = [
+    ["Chapter One"] + ["Filler sentence about slow and steady saving habits."] * 30,
+    ["I was a hospital nurse and I started a blog about my debt."] + ["More filler about budgets and spending."] * 30,
+]
+
+DIGEST = {
+    "summary": "Her origin story and the case for slow money.",
+    "ideas": [{"name": "Debt as a teacher", "explanation": "Debt taught her to budget.",
+               "quotes": [{"text": "I was a hospital nurse and I started a blog about my debt.", "page": 2}]}],
+    "examples": [{"text": "The nurse's night-shift budget", "page": 2}],
+    "personal": [],
+}
+
+
+class BookClient(FakeClient):
+    def _stream(self, **kw):
+        if "<book_section>" in kw["messages"][0]["content"]:
+            self.calls.append(kw)
+            return FakeStream(DIGEST)
+        return super()._stream(**kw)
+
+
+def test_book_sections_keep_whole_pages_and_markers():
+    secs = books.sections(["a" * 60, "b" * 60, "c" * 60], max_chars=150)
+    assert [(s[0], s[1]) for s in secs] == [(1, 2), (3, 3)]
+    assert "[p. 2]" in secs[0][2] and secs[1][2].startswith("[p. 3]")
+
+
+def test_scanned_pdf_is_skipped_with_ocr_hint(tmp_path, capsys):
+    pdf = tmp_path / "scan.pdf"
+    make_pdf(pdf, [["x"]])
+    assert books.load_pdf(pdf) is None
+    assert "ocrmypdf" in capsys.readouterr().err
+
+
+def test_book_only_run(tmp_path, monkeypatch):
+    """A PDF alone yields a guide built from it, with its quotes checked against the PDF text."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
+    pdf = tmp_path / "slow-money.pdf"
+    make_pdf(pdf, BOOK_PAGES)
+    fake = BookClient({})
+    monkeypatch.setattr(cli, "make_client", lambda: fake)
+    out = tmp_path / "p.md"
+    args = ["Jane Ortiz", "--no-search", "--book", str(tmp_path), "-o", str(out), "--cache-dir", str(tmp_path / "c")]
+    assert cli.main(args) == 0
+
+    reads = [c for c in fake.calls if "<book_section>" in c["messages"][0]["content"]]
+    assert len(reads) == 1 and reads[0]["model"] == "claude-sonnet-5-5"
+    assert "[p. 2]" in reads[0]["messages"][0]["content"]
+    guide_prompt = fake.creates[0]["messages"][0]["content"]
+    assert "The guest's books" in guide_prompt and f"{pdf.resolve().as_uri()}#page=2" in guide_prompt
+    suggest_prompt = [c for c in fake.calls if "Already asked" in c["messages"][0]["content"]][0]["messages"][0]["content"]
+    assert "Debt as a teacher" in suggest_prompt and "night-shift budget (p. 2)" in suggest_prompt
+    md = out.read_text()
+    assert md.split('> "I was a hospital nurse')[1].split("\n\n")[0].count("couldn't find") == 0
+
+    # digests are cached: a re-run doesn't read the book again
+    fake.calls.clear()
+    assert cli.main(args) == 0
+    assert not [c for c in fake.calls if "<book_section>" in c["messages"][0]["content"]]
+
+
+def test_book_needs_claude(tmp_path, capsys):
+    assert cli.main(["Jane", "--book", str(tmp_path), "--no-llm"]) == 2
+    assert "--book uses Claude" in capsys.readouterr().err
