@@ -82,6 +82,7 @@ def suggest(
     effort: str = "high",
     writing: list[dict] | None = None,
     books: list[dict] | None = None,
+    publications: str = "",
 ) -> Suggestions:
     n = len(episodes)
     asked = "\n".join(f"- ({c.times_asked}/{n}) {c.canonical_question}" for c in clusters)
@@ -99,6 +100,7 @@ def suggest(
             if books
             else ""
         )
+        + (f"\nTheir academic publications (build on specific papers):\n{publications}\n" if publications else "")
         + (
             f"\nThe interview will focus on this topic: {topic}. Every fresh question and no-context "
             "prompt should be about it, drawing on what the guest has said elsewhere that bears on it.\n"

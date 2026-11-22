@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from guestprep import books, cli, cluster, discover, extract, report, transcripts
+from guestprep import books, cli, papers, plan, cluster, discover, extract, report, transcripts
 from guestprep.models import Cluster, Episode, Question, Segment, Video, format_timestamp, parse_timestamp
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -235,10 +235,17 @@ def test_claude_pipeline_end_to_end(tmp_path, monkeypatch):
     # every extracted question lands in exactly one cluster despite the bad ids
     assert sum(len(c["members"]) for c in data["clusters"]) == 7
     assert len(fake.calls) == 5
-    # by default every step runs on Opus 5.5 at high effort
+    # each stage gets its own model: interviews on Sonnet (medium), grouping on Opus (medium),
+    # guide and fresh questions on Opus (high; not xhigh, since no books or papers were given)
     for kw in fake.calls + fake.creates:
-        assert kw["model"] == "claude-opus-5-5"
-        assert kw["output_config"]["effort"] == "high"
+        user = kw["messages"][0]["content"]
+        got = (kw["model"], kw["output_config"]["effort"])
+        if "<transcript>" in user:
+            assert got == ("claude-sonnet-5-5", "medium")
+        elif "Already asked" in user or "tools" in kw:
+            assert got == ("claude-opus-5-5", "high")
+        else:
+            assert got == ("claude-opus-5-5", "medium")
     fresh = md.split("## Fresh questions")[1].split("##")[0]
     assert "father's bankruptcies" in fresh and "Builds on: Her father" in fresh
     assert "forced choice" in md.split("## No-context prompts")[1]
@@ -655,3 +662,108 @@ def test_book_titles_cleaned_from_download_metadata():
     name = Path("Conscious Experience -- Anil Gupta -- Harvard, 2019 -- isbn13 9780674987784.pdf")
     assert books.pick_title("", name) == "Conscious Experience"
     assert books.pick_title("", Path("the-concept-of-truth.pdf")) == "the concept of truth"
+
+
+# ---------------------------------------------------------------- per-stage models
+
+def test_plan_per_stage_and_overrides():
+    p = plan.make_plan()
+    assert p.stages["transcripts"] == ("claude-sonnet-5-5", "medium")
+    assert p.stages["books"] == ("claude-opus-5-5", "high")
+    assert p.stages["guide"] == ("claude-opus-5-5", "high")
+    assert plan.make_plan(dense=True).stages["guide"] == ("claude-opus-5-5", "xhigh")
+    assert set(plan.make_plan(fast=True).stages.values()) == {("claude-sonnet-5-5", "medium")}
+    o = plan.make_plan(reader_model="claude-opus-5-5", effort="low")
+    assert o.stages["transcripts"] == ("claude-opus-5-5", "low") and o.stages["guide"][1] == "low"
+    assert "Sonnet 5.5 (medium)" in p.describe()
+
+
+def test_book_makes_guest_dense(tmp_path, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
+    make_pdf(tmp_path / "slow-money.pdf", BOOK_PAGES)
+    fake = BookClient({})
+    monkeypatch.setattr(cli, "make_client", lambda: fake)
+    assert cli.main(["Jane Ortiz", "--no-search", "--book", str(tmp_path), "-o", str(tmp_path / "p.md"),
+                     "--cache-dir", str(tmp_path / "c")]) == 0
+    read = [c for c in fake.calls if "<book_section>" in c["messages"][0]["content"]][0]
+    assert (read["model"], read["output_config"]["effort"]) == ("claude-opus-5-5", "high")
+    assert fake.creates[0]["output_config"]["effort"] == "xhigh"
+
+
+# ---------------------------------------------------------------- --papers (OpenAlex)
+
+AUTHORS = {"results": [
+    {"id": "https://openalex.org/A1", "display_name": "Jane Ortiz", "works_count": 3,
+     "last_known_institutions": [{"display_name": "Acme Dental"}], "topics": [{"display_name": "Dentistry"}]},
+    {"id": "https://openalex.org/A2", "display_name": "Jane Ortiz", "works_count": 40,
+     "last_known_institutions": [{"display_name": "Uni of Money"}], "topics": [{"display_name": "Household finance"}]},
+]}
+
+WORKS = {"results": [
+    {"id": "https://openalex.org/W1", "doi": "https://doi.org/10.1/slow", "title": "Slow Money", "publication_year": 2020,
+     "type": "article", "cited_by_count": 50, "primary_location": {"source": {"display_name": "J. Finance"}},
+     "best_oa_location": {"pdf_url": "https://example.org/slow.pdf"},
+     "abstract_inverted_index": {"Debt": [0], "teaches": [1], "patience.": [2]}},
+    {"id": "https://openalex.org/W2", "doi": None, "title": "Slow money", "publication_year": 2020, "type": "article",
+     "cited_by_count": 1, "primary_location": None, "best_oa_location": None, "abstract_inverted_index": None},
+    {"id": "https://openalex.org/W3", "doi": None, "title": "Blocked Paper", "publication_year": 2024, "type": "article",
+     "cited_by_count": 5, "primary_location": None, "best_oa_location": {"pdf_url": "https://philarchive.org/x.pdf"},
+     "abstract_inverted_index": None},
+]}
+
+
+def _fake_openalex(monkeypatch, pdf_bytes):
+    import requests
+
+    def get(url, params=None, **kw):
+        if url.endswith("/authors"):
+            return SimpleNamespace(status_code=200, json=lambda: AUTHORS, text="")
+        if url.endswith("/works"):
+            return SimpleNamespace(status_code=200, json=lambda: WORKS, text="")
+        if url.endswith("slow.pdf"):
+            return SimpleNamespace(status_code=200, content=pdf_bytes)
+        return SimpleNamespace(status_code=403, content=b"<html>Just a moment...</html>")
+    monkeypatch.setattr(requests, "get", get)
+
+
+class PapersClient(BookClient):
+    def _stream(self, **kw):
+        if "Author records" in kw["messages"][0]["content"]:
+            self.calls.append(kw)
+            return FakeStream({"index": 1, "why": "finance, not dentistry"})
+        return super()._stream(**kw)
+
+
+def test_openalex_abstract_and_dedupe(tmp_path, monkeypatch):
+    _fake_openalex(monkeypatch, b"")
+    works = papers.list_works({"id": "https://openalex.org/A2"}, tmp_path)
+    assert [w["title"] for w in works] == ["Blocked Paper", "Slow Money"]  # newest first; duplicate title dropped
+    assert works[1]["abstract"] == "Debt teaches patience." and works[1]["venue"] == "J. Finance"
+
+
+def test_papers_run(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
+    src = tmp_path / "src.pdf"
+    make_pdf(src, BOOK_PAGES)
+    _fake_openalex(monkeypatch, src.read_bytes())
+    fake = PapersClient({})
+    monkeypatch.setattr(cli, "make_client", lambda: fake)
+    out = tmp_path / "p.md"
+    assert cli.main(["Jane Ortiz", "--no-search", "--papers", "--about", "money writer", "-o", str(out),
+                     "--cache-dir", str(tmp_path / "c")]) == 0
+    err = capsys.readouterr().err
+    assert "Uni of Money" in err and "A1 Jane Ortiz" in err  # chosen author, with the alternative named
+    assert "1 free PDF(s) wouldn't download" in err
+    guide_prompt = fake.creates[0]["messages"][0]["content"]
+    assert "Their academic publications" in guide_prompt and "abstract: Debt teaches patience." in guide_prompt
+    assert "### Slow Money" in guide_prompt  # the free PDF was read in full, under its OpenAlex title
+    suggest_prompt = [c for c in fake.calls if "Already asked" in c["messages"][0]["content"]][0]["messages"][0]["content"]
+    assert "Blocked Paper (2024)" in suggest_prompt
+
+
+def test_openalex_rate_limit_message(tmp_path, monkeypatch):
+    import requests
+
+    monkeypatch.setattr(requests, "get", lambda *a, **k: SimpleNamespace(status_code=429, text="Rate limit exceeded"))
+    with pytest.raises(papers.PapersError, match="OPENALEX_API_KEY"):
+        papers.list_works({"id": "A1"}, tmp_path)
