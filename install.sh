@@ -25,7 +25,7 @@ mv "$RC.guestprep.tmp" "$RC"
 cat >> "$RC" <<EOF
 # >>> guestprep >>>
 alias guestprep="$DIR/.venv/bin/guestprep"
-alias guestprep-update="curl -fsSL https://github.com/ovnimz/micahzarin/archive/HEAD.tar.gz | tar -xz --strip-components=1 -C '$DIR' && '$DIR/.venv/bin/pip' install -q -e '$DIR' && echo 'guestprep updated'"
+alias guestprep-update="bash '$DIR/update.sh'"
 # <<< guestprep <<<
 EOF
 
@@ -33,6 +33,13 @@ echo
 echo "Done. Open a new Terminal window, then from any folder:"
 echo "  guestprep \"Guest Name\" --web"
 echo "  guestprep-update        # get the latest version"
+if ! command -v gh >/dev/null || ! gh auth token >/dev/null 2>&1; then
+  echo
+  echo "guestprep-update downloads from GitHub with your login (the repository is private)."
+  echo "Set that up once with:"
+  echo "  brew install gh"
+  echo "  gh auth login"
+fi
 if ! grep -q "ANTHROPIC_API_KEY" "$RC"; then
   echo
   echo "You still need a Claude API key. Add it with:"

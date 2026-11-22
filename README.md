@@ -52,7 +52,15 @@ bash install.sh
 
 This installs guestprep and adds two commands to every new Terminal window:
 `guestprep` (from any folder) and `guestprep-update` (download the latest
-version). Run it again any time; it's safe. You also need a Claude API key:
+version). Run it again any time; it's safe.
+
+The repository is private, so `guestprep-update` downloads with your GitHub
+login through GitHub's `gh` tool. Set that up once:
+
+```
+brew install gh
+gh auth login      # choose GitHub.com, then log in with the browser
+``` You also need a Claude API key:
 
 ```
 echo 'export ANTHROPIC_API_KEY=sk-ant-...' >> ~/.zshrc
