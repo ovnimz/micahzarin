@@ -81,7 +81,8 @@ guestprep "Jane Doe" --web                    # also search podcast sites, writt
 guestprep "Jane Doe" --topic "being a person"  # focus the sheet and the fresh questions on one topic
 guestprep "Jane Doe" --writing https://jane.substack.com   # read their Substack (or any post URL)
 guestprep "Jane Doe" --book ~/Books/jane-doe/   # read PDFs of their books (a file or a folder)
-guestprep "Jane Doe" --fast                   # quickest: every step on Sonnet
+guestprep "Jane Doe" --fast                   # cheaper and quicker: every step on Sonnet 5.5
+guestprep "Jane Doe" --effort xhigh           # think harder at every step (low/medium/high/xhigh/max)
 guestprep "Jane Doe" --no-guide               # questions only, skip the researched guide
 guestprep "Jane Doe" --no-llm                 # keyword heuristics only, no API key (rough)
 ```
@@ -99,14 +100,14 @@ works even when the guest has few or no recorded interviews.
 
 `--book` (or `--pdf`) takes a PDF of the guest's book or paper, or a folder
 of PDFs, and can be given several times. Each book is read in full: Claude
-Sonnet reads it in sections of about 100 pages and notes each section's
+reads it in sections of about 100 pages and notes each section's
 argument, key ideas, memorable examples and anything personal, with exact
 quotes and page numbers. The guide's ideas section is then built from those
 notes, quotes the books with links that open the PDF at the right page
 (`file:///...#page=42`), and the reading list says which chapters to start
 with. Every book quote is checked word for word against the PDF. The fresh
 questions draw on specific arguments and examples, with page numbers. The
-notes are cached, so a book is only read once. It works with no interviews at
+notes are cached, so a book is only read once per model. It works with no interviews at
 all.
 
 - Page numbers are the PDF's own page numbers, which may differ from the
@@ -115,8 +116,8 @@ all.
   title comes from the PDF's metadata, or from the filename if there's none.
 - Scanned PDFs have no text to read. Run them through OCR first
   (`brew install ocrmypdf`, then `ocrmypdf scan.pdf book.pdf`).
-- Cost: a 300-page book is roughly 150-250k input tokens on Sonnet, about
-  $0.50-1 per book, once.
+- Cost: a 300-page book is roughly 150-250k input tokens, about $1-2.50 per
+  book on the default Opus 5.5 (half that with `--fast`), once.
 
 `--transcripts` covers podcasts that aren't on YouTube. Many shows publish
 transcripts on their websites; save them as `.txt` files. Lines may start with
@@ -147,18 +148,21 @@ blocked:
 
 ## Speed
 
-Transcripts are read by Claude Sonnet (`--reader-model`) eight at a time,
-starting as each one downloads. The web search runs alongside the YouTube
-search, and the guide is researched while the questions are grouped. Opus
-(`--model`) does the grouping, fresh questions and guide. `--fast` moves those
-to Sonnet too. YouTube downloads stay one at a time to avoid rate limits.
+Every step runs on Claude Opus 5.5 at high effort by default: reading
+transcripts and books (`--reader-model`), grouping, fresh questions and the
+guide (`--model`). `--effort` changes how hard it thinks at every step.
+`--fast` runs everything on Sonnet 5.5 at medium effort instead, for about half
+the cost. Transcripts are read eight at a time, starting as each one downloads.
+The web search runs alongside the YouTube search, and the guide is researched
+while the questions are grouped. YouTube downloads stay one at a time to avoid
+rate limits.
 
 ## Cost
 
 Each transcript is read once and the result is cached, so re-runs only repeat
 the grouping step. A 1-2 hour episode is roughly 20-40k input tokens. A
-15-interview run on the default model (`claude-opus-5-5`) costs about
-$1-3. `--web` adds up to 15 web searches ($10 per 1,000) plus reading web
+15-interview run on the default (Opus 5.5, high effort, $4/$20 per million
+input/output tokens) costs about $3-6; `--fast` is about half that. `--web` adds up to 15 web searches ($10 per 1,000) plus reading web
 transcripts, which can be longer than YouTube ones. Use `--model` to pick a different one.
 
 Requests have server-side refusal fallback turned on (`fallbacks: "default"`).

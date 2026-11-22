@@ -107,7 +107,9 @@ def run_until_tool(
     return None, text_seen
 
 
-def discover(client, model: str, guest: str, about: str, cache_dir: Path, topic: str = "") -> list[dict]:
+def discover(
+    client, model: str, guest: str, about: str, cache_dir: Path, topic: str = "", effort: str = "high"
+) -> list[dict]:
     key = hashlib.sha1(f"{guest}|{about}|{topic}".lower().encode()).hexdigest()[:12]
     cache = cache_dir / "web" / f"discover-{key}.json"
     if cache.exists() and time.time() - cache.stat().st_mtime < DISCOVERY_TTL:
@@ -116,7 +118,7 @@ def discover(client, model: str, guest: str, about: str, cache_dir: Path, topic:
     who = f"{guest} ({about})" if about else guest
     ask = f"Guest: {who}" + (f"\nPrioritise conversations that touch on: {topic}" if topic else "")
     try:
-        result, text_seen = run_until_tool(client, model, SYSTEM, ask, [WEB_SEARCH_TOOL, REPORT_TOOL], "report_appearances")
+        result, text_seen = run_until_tool(client, model, SYSTEM, ask, [WEB_SEARCH_TOOL, REPORT_TOOL], "report_appearances", effort=effort)
     except Refused:
         print("  web search request was declined; skipping --web", file=sys.stderr)
         return []

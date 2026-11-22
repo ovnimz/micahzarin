@@ -235,11 +235,10 @@ def test_claude_pipeline_end_to_end(tmp_path, monkeypatch):
     # every extracted question lands in exactly one cluster despite the bad ids
     assert sum(len(c["members"]) for c in data["clusters"]) == 7
     assert len(fake.calls) == 5
-    # transcripts are read by the fast model; grouping and suggestions use the main one
-    for kw in fake.calls:
-        reading = "<transcript>" in kw["messages"][0]["content"]
-        assert kw["model"] == ("claude-sonnet-5-5" if reading else "claude-opus-5-5")
-    assert fake.creates[0]["model"] == "claude-opus-5-5"
+    # by default every step runs on Opus 5.5 at high effort
+    for kw in fake.calls + fake.creates:
+        assert kw["model"] == "claude-opus-5-5"
+        assert kw["output_config"]["effort"] == "high"
     fresh = md.split("## Fresh questions")[1].split("##")[0]
     assert "father's bankruptcies" in fresh and "Builds on: Her father" in fresh
     assert "forced choice" in md.split("## No-context prompts")[1]
@@ -630,7 +629,7 @@ def test_book_only_run(tmp_path, monkeypatch):
     assert cli.main(args) == 0
 
     reads = [c for c in fake.calls if "<book_section>" in c["messages"][0]["content"]]
-    assert len(reads) == 1 and reads[0]["model"] == "claude-sonnet-5-5"
+    assert len(reads) == 1 and reads[0]["model"] == "claude-opus-5-5"
     assert "[p. 2]" in reads[0]["messages"][0]["content"]
     guide_prompt = fake.creates[0]["messages"][0]["content"]
     assert "The guest's books" in guide_prompt and f"{pdf.resolve().as_uri()}#page=2" in guide_prompt
