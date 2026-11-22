@@ -648,3 +648,11 @@ def test_book_only_run(tmp_path, monkeypatch):
 def test_book_needs_claude(tmp_path, capsys):
     assert cli.main(["Jane", "--book", str(tmp_path), "--no-llm"]) == 2
     assert "--book uses Claude" in capsys.readouterr().err
+
+
+def test_book_titles_cleaned_from_download_metadata():
+    junk = "Empiricism and Experience    Anil Gupta    Oxford University Press USA    isbn13 9780190293451    92f916b0"
+    assert books.pick_title(junk, Path("x.pdf")) == "Empiricism and Experience"
+    name = Path("Conscious Experience -- Anil Gupta -- Harvard, 2019 -- isbn13 9780674987784.pdf")
+    assert books.pick_title("", name) == "Conscious Experience"
+    assert books.pick_title("", Path("the-concept-of-truth.pdf")) == "the concept of truth"
