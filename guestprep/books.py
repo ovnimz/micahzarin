@@ -88,7 +88,7 @@ def pdf_paths(args: list[Path]) -> list[Path]:
     return out
 
 
-def load_pdf(path: Path) -> dict | None:
+def load_pdf(path: Path, title: str = "") -> dict | None:
     """-> {title, path, url, pages: [text per page]}, or None if there's no text to read."""
     import logging
 
@@ -110,7 +110,7 @@ def load_pdf(path: Path) -> dict | None:
             file=sys.stderr,
         )
         return None
-    title = pick_title(meta_title, path)
+    title = title or pick_title(meta_title, path)
     return {"title": title, "path": str(path), "url": path.resolve().as_uri(), "pages": pages}
 
 
@@ -170,9 +170,13 @@ def _digest(client, model: str, guest: str, book: dict, sec: tuple[int, int, str
     return data
 
 
-def collect(paths: list[Path], client, model: str, guest: str, cache_dir: Path, effort: str = "low") -> list[dict]:
-    """-> [{title, path, url, pages, digests}] for each readable PDF."""
-    books = [b for b in (load_pdf(p) for p in pdf_paths(paths)) if b]
+def collect(
+    paths: list[Path], client, model: str, guest: str, cache_dir: Path, effort: str = "high",
+    titles: dict[str, str] | None = None,
+) -> list[dict]:
+    """-> [{title, path, url, pages, digests}] for each readable PDF. `titles` maps a path to a known title."""
+    titles = titles or {}
+    books = [b for b in (load_pdf(p, titles.get(str(p), "")) for p in pdf_paths(paths)) if b]
     jobs = [(b, s) for b in books for s in sections(b["pages"])]
     for b in books:
         print(f"  {b['title']}: {len(b['pages'])} pages", file=sys.stderr)

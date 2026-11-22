@@ -10,8 +10,9 @@ import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 
-from . import books, cluster, discover, extract, guide, report, suggest, transcripts, web, writing
+from . import books, cluster, discover, extract, guide, papers, report, suggest, transcripts, web, writing
 from .llm import DEFAULT_MODEL, FAST_MODEL, LLMError, make_client
+from .plan import make_plan
 from .models import Episode
 
 BLOCKED_HELP = """\
@@ -65,19 +66,26 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                    help="the guest's Substack (whole archive) or a post/blog URL; repeatable")
     p.add_argument("--book", "--pdf", dest="book", action="append", default=[], type=Path, metavar="PDF",
                    help="a PDF of the guest's book or paper, or a folder of PDFs; repeatable. Read in full for the guide")
+    p.add_argument("--papers", action="store_true",
+                   help="find their academic papers on OpenAlex: abstracts go to the guide, free PDFs are read in full")
+    p.add_argument("--max-papers", type=int, default=6, help="free paper PDFs to read in full with --papers (default 6)")
+    p.add_argument("--openalex-author", default="", metavar="ID",
+                   help="OpenAlex author ID (A...) to use with --papers, if it picks the wrong person")
+    p.add_argument("--dense", action="store_true",
+                   help="treat the guest as dense/academic: the guide and questions think harder (automatic with --book/--papers)")
     p.add_argument("--max-posts", type=int, default=25, help="posts to read per Substack (default 25)")
     p.add_argument("--no-guide", action="store_true", help="skip the researched guide (bio, ideas, quotes, reading list)")
     p.add_argument("--transcripts", type=Path, help="directory of transcripts you already have (.txt .vtt .srt .json3)")
     p.add_argument("--cookies-from-browser", metavar="BROWSER", help="use YouTube login cookies from chrome / safari / firefox / edge / brave")
     p.add_argument("--cookies", help="Netscape cookies.txt for YouTube (alternative to --cookies-from-browser)")
     p.add_argument("--proxy", help="HTTP(S) proxy URL for YouTube requests")
-    p.add_argument("--model", default=DEFAULT_MODEL, help=f"model for grouping, fresh questions and the guide (default {DEFAULT_MODEL})")
-    p.add_argument("--reader-model", default=DEFAULT_MODEL,
-                   help=f"model that reads each transcript and book and searches the web (default {DEFAULT_MODEL})")
-    p.add_argument("--effort", default="high", choices=["low", "medium", "high", "xhigh", "max"],
-                   help="how hard Claude thinks at every step (default high)")
-    p.add_argument("--fast", action="store_true",
-                   help=f"cheaper, quicker run: every step on {FAST_MODEL} at medium effort (about half the cost)")
+    p.add_argument("--model", default=None,
+                   help=f"model for grouping, the guide and fresh questions (default {DEFAULT_MODEL})")
+    p.add_argument("--reader-model", default=None,
+                   help=f"model that reads interviews and searches the web (default {FAST_MODEL})")
+    p.add_argument("--effort", default=None, choices=["low", "medium", "high", "xhigh", "max"],
+                   help="use this effort at every stage (default: chosen per stage, see the README)")
+    p.add_argument("--fast", action="store_true", help=f"cheapest, quickest run: every stage on {FAST_MODEL} at medium")
     p.add_argument("--no-llm", action="store_true", help="keyword heuristics instead of Claude (rough; no API key needed)")
     p.add_argument("--worn-min", type=int, default=3, help="interviews a question must appear in to count as worn out (default 3)")
     p.add_argument("-o", "--out", type=Path, help="report path (default guestprep-<guest>.md); a .json is written alongside")
@@ -114,7 +122,8 @@ def gather_episodes(args: argparse.Namespace, on_episode=None) -> tuple[list[Epi
     if args.web:
         print(f"Searching the web for {args.guest} in the background...", file=sys.stderr)
         bg = ThreadPoolExecutor(max_workers=1)
-        web_search = bg.submit(web.discover, make_client(), args.reader_model, args.guest, args.about, args.cache_dir, args.topic, args.effort)
+        web_search = bg.submit(web.discover, make_client(), args.plan.model("web"), args.guest, args.about, args.cache_dir, args.topic,
+            args.plan.effort("web"))
         bg.shutdown(wait=False)
 
     if candidates:
@@ -202,6 +211,26 @@ def _fetch_with_backoff(v, args) -> list:
     raise AssertionError("unreachable")
 
 
+def _read_papers(args: argparse.Namespace, client) -> tuple[list[dict], list[dict]]:
+    """-> (works listed on OpenAlex, free PDFs among them read like books). Never raises."""
+    try:
+        author = papers.find_author(
+            client, args.plan.model("web"), args.guest, args.about, args.cache_dir, args.openalex_author
+        )
+        if author is None:
+            return [], []
+        works = papers.list_works(author, args.cache_dir)
+        pdfs = papers.download_pdfs(works, args.cache_dir, args.max_papers)
+    except papers.PapersError as e:
+        print(f"  papers skipped: {e}", file=sys.stderr)
+        return [], []
+    read = books.collect(
+        [p for p, _ in pdfs], client, args.plan.model("books"), args.guest, args.cache_dir, args.plan.effort("books"),
+        titles={str(p): t for p, t in pdfs},
+    ) if pdfs else []
+    return works, read
+
+
 def run(args: argparse.Namespace) -> int:
     suggestions = None
     guide_data = None
@@ -215,14 +244,13 @@ def run(args: argparse.Namespace) -> int:
         clusters = cluster.cluster_heuristic(episodes)
     else:
         client = make_client()
-        model = args.model
-        effort = args.effort
+        plan = args.plan
 
         def work(ep: Episode) -> Episode | None:
             try:
                 ok = extract.extract_with_claude(
-                    client, args.reader_model, args.guest, ep, args.cache_dir, args.about,
-                    effort=effort,
+                    client, plan.model("transcripts"), args.guest, ep, args.cache_dir, args.about,
+                    effort=plan.effort("transcripts"),
                 )
             except LLMError as e:
                 print(f"  extraction failed for {ep.video.title}: {e}", file=sys.stderr)
@@ -235,12 +263,15 @@ def run(args: argparse.Namespace) -> int:
 
         with ThreadPoolExecutor(max_workers=8) as pool:
             pending: list[Future] = []
-            posts_job = books_job = None
+            posts_job = books_job = papers_job = None
             if args.book:
                 print("Reading their books in the background...", file=sys.stderr)
                 books_job = pool.submit(
-                    books.collect, args.book, client, args.reader_model, args.guest, args.cache_dir, effort,
+                    books.collect, args.book, client, plan.model("books"), args.guest, args.cache_dir, plan.effort("books"),
                 )
+            if args.papers:
+                print("Looking up their papers on OpenAlex in the background...", file=sys.stderr)
+                papers_job = pool.submit(_read_papers, args, client)
             if args.writing:
                 print("Reading their writing in the background...", file=sys.stderr)
                 posts_job = pool.submit(writing.collect, args.writing, args.cache_dir, args.max_posts)
@@ -251,10 +282,15 @@ def run(args: argparse.Namespace) -> int:
             if posts:
                 print(f"  {len(posts)} pieces of their writing", file=sys.stderr)
             book_list = books_job.result() if books_job else []
+            works, paper_books = papers_job.result() if papers_job else ([], [])
+            if works:
+                print(f"  {len(works)} papers listed, {len(paper_books)} read in full", file=sys.stderr)
+            book_list += paper_books
+            bibliography = papers.for_prompt(works)
             if book_list:
                 sections = sum(len(b["digests"]) for b in book_list)
                 print(f"  {len(book_list)} book(s) read ({sections} sections)", file=sys.stderr)
-            if not episodes and not posts and not book_list:
+            if not episodes and not posts and not book_list and not works:
                 print("No usable interviews, writing or books found.", file=sys.stderr)
                 return 1
 
@@ -262,15 +298,18 @@ def run(args: argparse.Namespace) -> int:
             if not args.no_guide:
                 print("Researching the guide in the background (background, ideas, quotes, reading list)...", file=sys.stderr)
                 guide_job = pool.submit(
-                    guide.build_guide, client, model, args.guest, args.about, args.topic, episodes, args.cache_dir, effort, posts,
-                    book_list,
+                    guide.build_guide, client, plan.model("guide"), args.guest, args.about, args.topic, episodes, args.cache_dir,
+                    plan.effort("guide"), posts, book_list, bibliography,
                 )
             print("Grouping repeat questions across interviews...", file=sys.stderr)
-            clusters = cluster.cluster_with_claude(client, model, args.guest, episodes, args.topic, effort=effort)
+            clusters = cluster.cluster_with_claude(
+                client, plan.model("grouping"), args.guest, episodes, args.topic, effort=plan.effort("grouping")
+            )
             if not args.no_suggest:
                 print("Writing fresh questions...", file=sys.stderr)
                 suggestions = suggest.suggest(
-                    client, model, args.guest, args.about, episodes, clusters, args.topic, effort, posts, book_list
+                    client, plan.model("questions"), args.guest, args.about, episodes, clusters, args.topic,
+                    plan.effort("questions"), posts, book_list, papers.titles(works),
                 )
             if guide_job is not None:
                 print("Finishing the guide...", file=sys.stderr)
@@ -299,11 +338,18 @@ def run(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    if args.fast:
-        args.model = args.reader_model = FAST_MODEL
-        args.effort = "medium"
+    args.plan = make_plan(
+        fast=args.fast, dense=args.dense or bool(args.book or args.papers),
+        model=args.model, reader_model=args.reader_model, effort=args.effort,
+    )
+    if not (args.no_llm or args.list_only):
+        print(args.plan.describe(), file=sys.stderr)
     if args.cookies_from_browser:
         args.cookies = f"browser:{args.cookies_from_browser.lower()}"
+    if args.papers and args.no_llm:
+        print("--papers uses Claude to pick the right author and read the PDFs, so it can't be combined with --no-llm.",
+              file=sys.stderr)
+        return 2
     if args.book and args.no_llm:
         print("--book uses Claude to read the PDFs, so it can't be combined with --no-llm.", file=sys.stderr)
         return 2

@@ -81,8 +81,10 @@ guestprep "Jane Doe" --web                    # also search podcast sites, writt
 guestprep "Jane Doe" --topic "being a person"  # focus the sheet and the fresh questions on one topic
 guestprep "Jane Doe" --writing https://jane.substack.com   # read their Substack (or any post URL)
 guestprep "Jane Doe" --book ~/Books/jane-doe/   # read PDFs of their books (a file or a folder)
-guestprep "Jane Doe" --fast                   # cheaper and quicker: every step on Sonnet 5.5
-guestprep "Jane Doe" --effort xhigh           # think harder at every step (low/medium/high/xhigh/max)
+guestprep "Jane Doe" --papers                 # academics: their papers from OpenAlex (abstracts + free PDFs)
+guestprep "Jane Doe" --dense                  # a dense thinker: the guide and questions think harder
+guestprep "Jane Doe" --fast                   # cheapest: every stage on Sonnet 5.5
+guestprep "Jane Doe" --effort xhigh           # one effort for every stage (low/medium/high/xhigh/max)
 guestprep "Jane Doe" --no-guide               # questions only, skip the researched guide
 guestprep "Jane Doe" --no-llm                 # keyword heuristics only, no API key (rough)
 ```
@@ -117,7 +119,20 @@ all.
 - Scanned PDFs have no text to read. Run them through OCR first
   (`brew install ocrmypdf`, then `ocrmypdf scan.pdf book.pdf`).
 - Cost: a 300-page book is roughly 150-250k input tokens, about $1-2.50 per
-  book on the default Opus 5.5 (half that with `--fast`), once.
+  book on Opus 5.5 (half that with `--fast`), once.
+
+`--papers` is for academics. PhilPeople, PhilPapers and PhilArchive block
+scripts (Cloudflare's "Just a moment..." check), so it uses
+[OpenAlex](https://openalex.org), a free, open index of the same journals and
+books. It finds the guest's author record (several people usually share a
+name, so Claude picks the one matching `--about`, and prints the others), lists
+their most cited and newest work with venue, year and abstract for the guide,
+and reads up to `--max-papers` free PDFs in full, like `--book`. Some free PDFs
+(PhilArchive's especially) won't download from a script; it says how many, and
+you can save those from your browser and pass them with `--book`. If it picks
+the wrong person, rerun with `--openalex-author A...` using an ID it printed.
+OpenAlex's free allowance is shared per network; if it runs out, get a free key
+at openalex.org and `export OPENALEX_API_KEY=...`.
 
 `--transcripts` covers podcasts that aren't on YouTube. Many shows publish
 transcripts on their websites; save them as `.txt` files. Lines may start with
@@ -146,23 +161,36 @@ blocked:
 - `--cookies cookies.txt`: the same thing via an exported cookies file ([how](https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp))
 - `--proxy http://user:pass@host:port`: use a residential proxy
 
-## Speed
+## Which model does what
 
-Every step runs on Claude Opus 5.5 at high effort by default: reading
-transcripts and books (`--reader-model`), grouping, fresh questions and the
-guide (`--model`). `--effort` changes how hard it thinks at every step.
-`--fast` runs everything on Sonnet 5.5 at medium effort instead, for about half
-the cost. Transcripts are read eight at a time, starting as each one downloads.
-The web search runs alongside the YouTube search, and the guide is researched
-while the questions are grouped. YouTube downloads stay one at a time to avoid
-rate limits.
+Each stage gets the model and effort it needs, and the run prints its choices
+at the start:
+
+| Stage | Model | Effort | Why |
+|---|---|---|---|
+| Reading interviews, web search | Sonnet 5.5 | medium | Careful but mechanical, and most of the tokens |
+| Books and papers | Opus 5.5 | high | Dense arguments, exact quotes |
+| Grouping repeat questions | Opus 5.5 | medium | Matching the same question worded differently |
+| Guide and fresh questions | Opus 5.5 | high, or **xhigh** for a dense guest | Understanding the ideas and finding new angles |
+
+A guest counts as dense when you give it their books or papers (`--book`,
+`--papers`) or add `--dense`. To change the choices: `--reader-model` sets the
+interview and web stages, `--model` the rest, `--effort` one effort for every
+stage, and `--fast` puts every stage on Sonnet 5.5 at medium.
+
+Transcripts are read eight at a time, starting as each one downloads. The web
+search runs alongside the YouTube search, and the guide is researched while the
+questions are grouped. YouTube downloads stay one at a time to avoid rate
+limits.
 
 ## Cost
 
 Each transcript is read once and the result is cached, so re-runs only repeat
 the grouping step. A 1-2 hour episode is roughly 20-40k input tokens. A
-15-interview run on the default (Opus 5.5, high effort, $4/$20 per million
-input/output tokens) costs about $3-6; `--fast` is about half that. `--web` adds up to 15 web searches ($10 per 1,000) plus reading web
+15-interview run costs about $2-4 with the default per-stage models (Sonnet 5.5
+at $2/$10 per million input/output tokens for the interviews, Opus 5.5 at
+$4/$20 for the rest). `--fast` is a little cheaper; `--model`/`--reader-model
+claude-opus-5-5` everywhere roughly doubles the interview reading. `--web` adds up to 15 web searches ($10 per 1,000) plus reading web
 transcripts, which can be longer than YouTube ones. Use `--model` to pick a different one.
 
 Requests have server-side refusal fallback turned on (`fallbacks: "default"`).

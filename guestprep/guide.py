@@ -30,7 +30,9 @@ writing and talks) where you can, not just profiles.
 You are also given quotes from the guest's previous interviews, each with \
 its source link, and, when available, the guest's own writing (blog or \
 Substack posts), and digests of the guest's books, read section by section \
-from PDFs the host supplied. Treat their books and writing as the primary \
+from PDFs the host supplied, and a list of their academic publications with \
+abstracts. Use the publications for the timeline, the ideas and the reading \
+list (link each with the url given). Treat their books and writing as the primary \
 source: build the ideas section mainly from them, explain each idea as the \
 books develop it (the argument, the examples, how it changes from book to \
 book), quote them, and put them in the reading list (for a book, say which \
@@ -145,6 +147,7 @@ def build_guide(
     effort: str = "high",
     writing: list[dict] | None = None,
     books: list[dict] | None = None,
+    bibliography: str = "",
 ) -> dict | None:
     writing = writing or []
     books = books or []
@@ -152,6 +155,7 @@ def build_guide(
         sorted(ep.video.id for ep in episodes)
         + sorted(w["url"] for w in writing)
         + sorted(f"{b['url']}:{len(b['digests'])}" for b in books)
+        + [hashlib.sha1(bibliography.encode()).hexdigest()[:8] if bibliography else ""]
     )
     key = hashlib.sha1(f"{guest}|{about}|{topic}|{ep_key}|{model}".lower().encode()).hexdigest()[:12]
     cache = cache_dir / "guide" / f"{key}.json"
@@ -174,6 +178,7 @@ def build_guide(
             + ("\n".join(lines) or "(none)")
             + (f"\n\nThe guest's own writing:\n\n{writing_mod.for_prompt(writing)}" if writing else "")
             + (f"\n\nThe guest's books (digests of each section, with exact quotes):\n\n{books_mod.for_prompt(books)}" if books else "")
+            + (f"\n\nTheir academic publications (from OpenAlex, newest first):\n{bibliography}" if bibliography else "")
         )
         try:
             guide, _ = web.run_until_tool(client, model, SYSTEM, user, TOOLS, "submit_guide", effort=effort, max_tokens=32000, rounds=12)
